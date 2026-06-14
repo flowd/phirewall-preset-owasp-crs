@@ -1,0 +1,71 @@
+{
+  "name": "flowd/phirewall-preset-owasp-crs",
+  "description": "OWASP Core Rule Set (CRS) for the Phirewall PHP firewall - the SecRule engine plus blocklist and fail2ban presets per paranoia level",
+  "type": "library",
+  "keywords": ["firewall", "owasp", "crs", "core-rule-set", "modsecurity", "secrule", "security", "waf", "psr-15", "psr-7"],
+  "license": [
+    "LGPL-3.0-or-later",
+    "proprietary"
+  ],
+  "authors": [
+    {
+      "name": "Sascha Egerer",
+      "email": "sascha.egerer@flowd.de",
+      "role": "Developer",
+      "homepage": "https://flowd.de"
+    }
+  ],
+  "require": {
+    "php": ">=8.2",
+    "flowd/phirewall": "^0.6@dev"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^11.5",
+    "phpstan/phpstan": "^1.12",
+    "friendsofphp/php-cs-fixer": "^3.89",
+    "rector/rector": "^1.2",
+    "nyholm/psr7": "^1.8",
+    "mikey179/vfsstream": "^1.6"
+  },
+  "suggest": {
+    "ext-zlib": "Required by bin/crs-import to extract the upstream CRS release tarball"
+  },
+  "autoload": {
+    "psr-4": {
+      "Flowd\\PhirewallPresetOwaspCrs\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Flowd\\PhirewallPresetOwaspCrs\\Tests\\": "tests/"
+    }
+  },
+  "bin": [
+    "bin/crs-import"
+  ],
+  "scripts": {
+    "phpunit": "XDEBUG_MODE=coverage vendor/bin/phpunit --color=always",
+    "phpstan": "vendor/bin/phpstan",
+    "rector:check": "vendor/bin/rector --dry-run",
+    "rector:fix": "vendor/bin/rector",
+    "cs:check": "vendor/bin/php-cs-fixer fix --diff --dry-run --verbose",
+    "cs:fix": "vendor/bin/php-cs-fixer fix --diff --verbose",
+    "crs:import": "@php bin/crs-import",
+    "test:phpt": "XDEBUG_MODE=off vendor/bin/phpunit --testsuite Integration --no-coverage",
+    "fix": [
+      "@rector:fix",
+      "@cs:fix"
+    ],
+    "test": [
+      "@rector:check",
+      "@cs:check",
+      "@phpunit",
+      "@phpstan"
+    ]
+  },
+  "extra": {
+    "branch-alias": {
+      "dev-main": "0.1.x-dev"
+    }
+  }
+}

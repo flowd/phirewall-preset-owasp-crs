@@ -1,0 +1,214 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * Imports the OWASP Core Rule Set into resources/rules.
+ *
+ * Usage:
+ *   bin/crs-import [--tag=v4.16.0] [--source=/path/to/coreruleset] [--dest=resources/rules]
+ *
+ * Without --tag the latest upstream release is resolved via the GitHub API.
+ * With --source a local coreruleset checkout (or its rules/ directory) is
+ * used instead of downloading; --tag then labels the manifest (default "local").
+ * Set GITHUB_TOKEN to raise the GitHub API rate limit.
+ */
+
+declare(strict_types=1);
+
+use Flowd\PhirewallPresetOwaspCrs\Import\Importer;
+
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+
+foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php'] as $autoloadFile) {
+    if (is_file($autoloadFile)) {
+        require $autoloadFile;
+        break;
+    }
+}
+
+if (!class_exists(Importer::class)) {
+    fwrite(STDERR, "Autoloader not found. Run \"composer install\" first.\n");
+    exit(1);
+}
+
+/**
+ * @param list<string> $argv
+ * @return array{tag: ?string, source: ?string, dest: string}
+ */
+function parseArguments(array $argv): array
+{
+    $options = ['tag' => null, 'source' => null, 'dest' => dirname(__DIR__) . '/resources/rules'];
+    foreach (array_slice($argv, 1) as $argument) {
+        if (preg_match('/^--(tag|source|dest)=(.+)$/', $argument, $matches) === 1) {
+            $options[$matches[1]] = $matches[2];
+            continue;
+        }
+
+        fwrite(STDERR, "Unknown argument: {$argument}\n");
+        fwrite(STDERR, "Usage: bin/crs-import [--tag=v4.16.0] [--source=/path/to/coreruleset] [--dest=resources/rules]\n");
+        exit(1);
+    }
+
+    return $options;
+}
+
+function httpGet(string $url): string
+{
+    $headers = [
+        'User-Agent: flowd-phirewall-preset-owasp-crs-import',
+        'Accept: application/vnd.github+json',
+    ];
+    $token = getenv('GITHUB_TOKEN');
+    if (is_string($token) && $token !== '') {
+        $headers[] = 'Authorization: Bearer ' . $token;
+    }
+
+    $context = stream_context_create([
+        'http' => ['header' => implode("\r\n", $headers), 'timeout' => 60, 'follow_location' => 1],
+    ]);
+
+    $content = @file_get_contents($url, false, $context);
+    if ($content === false) {
+        throw new RuntimeException('HTTP request failed: ' . $url);
+    }
+
+    return $content;
+}
+
+function resolveLatestTag(): string
+{
+    $json = httpGet('https://api.github.com/repos/coreruleset/coreruleset/releases/latest');
+    $data = json_decode($json, true);
+    $tag = is_array($data) ? ($data['tag_name'] ?? null) : null;
+    if (!is_string($tag) || $tag === '') {
+        throw new RuntimeException('Cannot resolve the latest coreruleset release tag from the GitHub API.');
+    }
+
+    return $tag;
+}
+
+/**
+ * Download the release tarball and read rule, data, license and notice files
+ * from it via the phar:// stream, without extracting to disk.
+ *
+ * @return array{files: array<string, string>, license: ?string, notice: ?string}
+ */
+function readReleaseTarball(string $tag): array
+{
+    $url = sprintf('https://github.com/coreruleset/coreruleset/archive/refs/tags/%s.tar.gz', rawurlencode($tag));
+    echo "Downloading {$url}\n";
+    $tarball = httpGet($url);
+
+    $downloadDirectory = dirname(__DIR__) . '/.build/crs-import';
+    if (!is_dir($downloadDirectory) && !mkdir($downloadDirectory, 0o775, true) && !is_dir($downloadDirectory)) {
+        throw new RuntimeException('Cannot create download directory: ' . $downloadDirectory);
+    }
+
+    $tarballPath = $downloadDirectory . '/coreruleset-' . preg_replace('/[^A-Za-z0-9._-]/', '_', $tag) . '.tar.gz';
+    if (file_put_contents($tarballPath, $tarball) === false) {
+        throw new RuntimeException('Cannot write tarball: ' . $tarballPath);
+    }
+
+    $pharData = new PharData($tarballPath);
+    $files = [];
+    $license = null;
+    $notice = null;
+    $iterator = new RecursiveIteratorIterator($pharData);
+    foreach ($iterator as $pharFileInfo) {
+        /** @var PharFileInfo $pharFileInfo */
+        $pathname = $pharFileInfo->getPathname();
+        $relativePath = preg_replace('#^phar://.*?\.tar\.gz/[^/]+/#', '', str_replace('\\', '/', $pathname)) ?? '';
+
+        if (preg_match('#^rules/[^/]+\.(conf|data)$#', $relativePath) === 1) {
+            $files[$relativePath] = (string)file_get_contents($pathname);
+            continue;
+        }
+
+        if ($relativePath === 'LICENSE') {
+            $license = (string)file_get_contents($pathname);
+        } elseif ($relativePath === 'NOTICE') {
+            $notice = (string)file_get_contents($pathname);
+        }
+    }
+
+    unlink($tarballPath);
+
+    return ['files' => $files, 'license' => $license, 'notice' => $notice];
+}
+
+/**
+ * @return array{files: array<string, string>, license: ?string, notice: ?string}
+ */
+function readLocalSource(string $sourceDirectory): array
+{
+    $rulesDirectory = is_dir($sourceDirectory . '/rules') ? $sourceDirectory . '/rules' : $sourceDirectory;
+    if (!is_dir($rulesDirectory)) {
+        throw new RuntimeException('Source directory not found: ' . $sourceDirectory);
+    }
+
+    $files = [];
+    foreach (glob($rulesDirectory . '/*.{conf,data}', GLOB_BRACE) ?: [] as $path) {
+        $files[basename($path)] = (string)file_get_contents($path);
+    }
+
+    return [
+        'files' => $files,
+        'license' => readFirstExisting([$sourceDirectory . '/LICENSE', dirname($rulesDirectory) . '/LICENSE']),
+        'notice' => readFirstExisting([$sourceDirectory . '/NOTICE', dirname($rulesDirectory) . '/NOTICE']),
+    ];
+}
+
+/**
+ * @param list<string> $paths
+ */
+function readFirstExisting(array $paths): ?string
+{
+    foreach ($paths as $path) {
+        if (is_file($path)) {
+            return (string)file_get_contents($path);
+        }
+    }
+
+    return null;
+}
+
+$options = parseArguments($argv);
+
+try {
+    if ($options['source'] !== null) {
+        $tag = $options['tag'] ?? 'local';
+        $source = readLocalSource($options['source']);
+    } else {
+        $tag = $options['tag'] ?? resolveLatestTag();
+        echo "Importing OWASP CRS {$tag}\n";
+        $source = readReleaseTarball($tag);
+    }
+
+    $importer = new Importer();
+    $importReport = $importer->import(
+        $source['files'],
+        $tag,
+        $options['dest'],
+        date('c'),
+        $source['license'],
+        $source['notice'],
+    );
+} catch (Throwable $throwable) {
+    fwrite(STDERR, 'Import failed: ' . $throwable->getMessage() . "\n");
+    exit(1);
+}
+
+echo "\nImported OWASP CRS {$importReport->crsVersion} into {$options['dest']}\n";
+echo sprintf("Kept rules: %d\n", $importReport->keptRuleCount());
+foreach ($importReport->ruleCountsByParanoiaLevel as $level => $count) {
+    echo sprintf("  paranoia level %d: %d\n", $level, $count);
+}
+
+echo sprintf("Dropped rules: %d\n", $importReport->droppedRuleCount());
+foreach ($importReport->droppedRuleCounts as $reason => $count) {
+    echo sprintf("  %s: %d\n", $reason, $count);
+}
+
+echo sprintf("Data files: %s\n", $importReport->dataFiles === [] ? '(none)' : implode(', ', $importReport->dataFiles));
+echo sprintf("Generated files: %d\n", count($importReport->generatedFiles));
