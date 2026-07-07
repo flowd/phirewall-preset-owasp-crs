@@ -11,7 +11,7 @@ This package provides two things:
 2. **Ready-made CRS presets** - a pre-filtered, per-paranoia-level snapshot of
    the CRS request rules, exposed as `Config` overlays:
    - **Blocklist preset** - block every request that matches a CRS rule.
-   - **Fail2Ban preset** - count CRS matches per client IP and ban repeat offenders.
+   - **Fail2Ban preset** - block every CRS match and additionally ban a client key that keeps matching.
 
 ## Installation
 
@@ -35,13 +35,20 @@ $config = $config->with(
 );
 ```
 
-Prefer banning probing clients over blocking single requests? Use the fail2ban preset:
+Want to also ban probing clients, not just block their matching requests? Use the fail2ban
+preset. It blocks every CRS match like the blocklist, and additionally bans the client key
+(the IP by default) once it reaches the threshold, so all further traffic from that key is
+blocked until the ban expires:
 
 ```php
 $config = $config->with(
     Presets::fail2ban(ParanoiaLevel::Level1, threshold: 5, period: 600, ban: 3600),
 );
 ```
+
+> **Behaviour change in phirewall 0.8.** The fail2ban preset now blocks *every* CRS match
+> (a 403), the same as the blocklist, and the threshold only governs the additional key ban.
+> Under 0.7 a match below the threshold passed through and merely counted. See the CHANGELOG.
 
 For manual wiring (custom rule name, enabling/disabling single CRS rule ids), get the
 raw rule set:
@@ -81,8 +88,11 @@ The engine implements a pragmatic subset of ModSecurity; see the table below.
 Like upstream CRS, paranoia levels are cumulative: `ParanoiaLevel::Level2` activates
 all level 1 and level 2 rules. Level 1 is designed to be safe for most applications;
 higher levels detect more but produce more false positives. Since Phirewall blocks on
-the first match (there is no anomaly scoring, see below), be conservative: start with
-level 1, or pair higher levels with the fail2ban preset instead of the blocklist.
+the first match (there is no anomaly scoring, see below) and both presets block every
+match, be conservative: start with level 1 and raise it only after checking the higher
+levels against your real traffic. The fail2ban preset does not soften this - it blocks
+the same matches and merely adds a key ban on top - so a higher level is not a safer
+choice there.
 
 ## What is included (and what is not)
 

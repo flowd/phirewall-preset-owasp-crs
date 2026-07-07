@@ -44,8 +44,16 @@ final class Presets
     }
 
     /**
-     * Treat CRS rule matches as failures and ban the client key (IP by default)
-     * after $threshold matches within $period seconds, for $ban seconds.
+     * Block every CRS rule match and ban repeat offenders.
+     *
+     * A CRS match marks a request as malicious, so every match is blocked (403).
+     * A match below $threshold blocks and counts (Fail2BanMatched); the $threshold-th
+     * match within $period seconds additionally bans the client key (IP by default)
+     * for $ban seconds, so any further request from that key is blocked until the ban
+     * expires.
+     *
+     * With phirewall 0.8 this is stricter than 0.7, where a match below the threshold
+     * passed through and only counted.
      */
     public static function fail2ban(
         ParanoiaLevel $paranoiaLevel = ParanoiaLevel::Level1,
