@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Flowd\PhirewallPresetOwaspCrs\Tests\Unit;
 
 use Flowd\Phirewall\Config;
+use Flowd\Phirewall\Config\DiagnosticsCounters;
+use Flowd\Phirewall\Config\DiagnosticsDispatcher;
 use Flowd\Phirewall\Http\Firewall;
 use Flowd\Phirewall\Store\InMemoryCache;
 use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSetMatcher;
@@ -80,6 +82,40 @@ final class PresetsTest extends TestCase
 
         $this->assertTrue($rule->filter()->match($this->requestWithQuery('1 union select password'))->isMatch());
         $this->assertFalse($rule->filter()->match($this->requestWithQuery('hello'))->isMatch());
+    }
+
+    public function testFail2banBlocksEveryCrsMatchAndBansRepeatOffender(): void
+    {
+        $root = $this->setUpRulesDirectory();
+        $diagnostics = new DiagnosticsCounters();
+        $config = (new Config(new InMemoryCache(), new DiagnosticsDispatcher($diagnostics)))->with(
+            Presets::fail2ban(ParanoiaLevel::Level1, threshold: 3, period: 120, ban: 900, rulesDirectory: $root->url()),
+        );
+        $firewall = new Firewall($config);
+
+        $attacker = ['REMOTE_ADDR' => '203.0.113.5'];
+        $sqli = (new ServerRequest('GET', 'https://example.test/', [], null, '1.1', $attacker))
+            ->withQueryParams(['q' => '1 union select password']);
+        $benign = (new ServerRequest('GET', 'https://example.test/', [], null, '1.1', $attacker))
+            ->withQueryParams(['q' => 'hello']);
+
+        // Every CRS match is blocked, including matches below the threshold.
+        $this->assertTrue($firewall->decide($sqli)->isBlocked());
+        $this->assertTrue($firewall->decide($sqli)->isBlocked());
+
+        // A benign request from the same IP still passes before the ban trips.
+        $this->assertFalse($firewall->decide($benign)->isBlocked());
+
+        // The third match reaches the threshold and bans the IP.
+        $this->assertTrue($firewall->decide($sqli)->isBlocked());
+
+        // Once banned, even a benign request from that IP is blocked.
+        $this->assertTrue($firewall->decide($benign)->isBlocked());
+
+        // The two sub-threshold matches blocked via Fail2BanMatched, the third banned.
+        $counters = $diagnostics->all();
+        $this->assertSame(2, $counters['fail2ban_matched']['total'] ?? 0);
+        $this->assertSame(1, $counters['fail2ban_banned']['total'] ?? 0);
     }
 
     public function testCoreRuleSetExposesTheLoadedRules(): void
