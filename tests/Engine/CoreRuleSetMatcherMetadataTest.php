@@ -25,5 +25,8 @@ final class CoreRuleSetMatcherMetadataTest extends TestCase
         $meta = $matchResult->metadata();
         $this->assertSame(400001, $meta['owasp_rule_id'] ?? null);
         $this->assertSame('Block admin path', $meta['msg'] ?? null);
+        $diagnosticHeaders = $meta['diagnostic_headers'] ?? [];
+        $this->assertIsArray($diagnosticHeaders);
+        $this->assertSame('400001', $diagnosticHeaders['X-Phirewall-Owasp-Rule'] ?? null);
     }
 }

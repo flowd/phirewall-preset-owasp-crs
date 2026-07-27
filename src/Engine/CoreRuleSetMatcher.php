@@ -25,7 +25,13 @@ final readonly class CoreRuleSetMatcher implements RequestMatcherInterface
             return MatchResult::noMatch();
         }
 
-        $meta = ['owasp_rule_id' => $id];
+        // diagnostic_headers drives the X-Phirewall-Owasp-Rule response header
+        // via Config::enableDiagnosticsHeaders(); owasp_rule_id and msg are
+        // structured metadata for event listeners reading the MatchResult.
+        $meta = [
+            'owasp_rule_id' => $id,
+            'diagnostic_headers' => ['X-Phirewall-Owasp-Rule' => (string) $id],
+        ];
         $rule = $this->coreRuleSet->getRule($id);
         if ($rule instanceof CoreRule) {
             $msg = $rule->actions['msg'] ?? null;
