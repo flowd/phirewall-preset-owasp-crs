@@ -180,10 +180,11 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
         });
 
         $coreRuleSet = $this->hydrate($ruleData);
-        if (!$coreRuleSet instanceof CoreRuleSet) {
-            // A cached entry that is not a list of well-formed rule arrays would
-            // otherwise drop rules silently - fail-open for a blocklist. Reparse
-            // the source instead.
+        if (!$coreRuleSet instanceof CoreRuleSet || ($ruleFiles !== [] && $coreRuleSet->ids() === [])) {
+            // The artifact is not a list of well-formed rule arrays, or it
+            // hydrated to zero rules despite the source having rule files (a
+            // truncated/corrupt artifact) - both fail-open for a blocklist.
+            // Reparse the source instead.
             return RuleSetLoader::load($this->paranoiaLevel, $rulesDirectory, $this->maxValuesPerCrsVariable);
         }
 
@@ -207,7 +208,6 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
             }
 
             try {
-                /** @var array{id: int, variables: list<string>, operator: string, operatorArgument: string, actions: array<string, int|string|bool>, contextFolder: ?string} $ruleArray */
                 $coreRuleSet->add(CoreRule::fromArray($ruleArray));
             } catch (\Throwable) {
                 return null;

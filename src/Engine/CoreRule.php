@@ -58,18 +58,35 @@ final readonly class CoreRule
     }
 
     /**
-     * @param array{id: int, variables: list<string>, operator: string, operatorArgument: string, actions: array<string, int|string|bool>, contextFolder: ?string} $data
+     * Rebuild a rule from compiled-cache data. Reads defensively (the input is
+     * a deserialized artifact, not necessarily trustworthy): missing keys use
+     * `??` rather than emitting undefined-index warnings, and a value of the
+     * wrong type raises an `InvalidArgumentException` for the caller to handle.
+     *
+     * @param array<mixed> $data
      */
     public static function fromArray(array $data): self
     {
-        return new self(
-            $data['id'],
-            $data['variables'],
-            $data['operator'],
-            $data['operatorArgument'],
-            $data['actions'],
-            $data['contextFolder'],
-        );
+        $id = $data['id'] ?? null;
+        $variables = $data['variables'] ?? null;
+        $operator = $data['operator'] ?? null;
+        $operatorArgument = $data['operatorArgument'] ?? null;
+        $actions = $data['actions'] ?? null;
+        $contextFolder = $data['contextFolder'] ?? null;
+
+        if (!is_int($id)
+            || !is_array($variables)
+            || !is_string($operator)
+            || !is_string($operatorArgument)
+            || !is_array($actions)
+            || ($contextFolder !== null && !is_string($contextFolder))
+        ) {
+            throw new \InvalidArgumentException('Compiled CRS rule data has an unexpected shape.');
+        }
+
+        /** @var list<string> $variables */
+        /** @var array<string, int|string|bool> $actions */
+        return new self($id, $variables, $operator, $operatorArgument, $actions, $contextFolder);
     }
 
     /**

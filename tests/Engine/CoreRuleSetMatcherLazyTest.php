@@ -119,6 +119,27 @@ final class CoreRuleSetMatcherLazyTest extends TestCase
         $this->assertTrue($matcher->match(new ServerRequest('GET', '/admin'))->isMatch());
     }
 
+    public function testEmptyArtifactWithRuleFilesFallsBackToReparsing(): void
+    {
+        [$root] = $this->rulesDirectory();
+        $rulesDir = $root->url() . '/rules';
+        $cacheDirectory = vfsStream::newDirectory('cache')->at($root);
+        $compiledDataCache = new CompiledDataCache($cacheDirectory->url());
+
+        // Seed a well-formed but EMPTY artifact under the matcher's identifier.
+        $ruleFiles = \Flowd\PhirewallPresetOwaspCrs\RuleSetLoader::ruleFiles(ParanoiaLevel::Level1, $rulesDir);
+        $identifier = 'owasp-crs-v1-pl' . ParanoiaLevel::Level1->value . '-' . substr(sha1(implode('|', $ruleFiles)), 0, 12);
+        $compiledDataCache->load($identifier, $ruleFiles, static fn(): array => []);
+        CompiledDataCache::clearProcessCache();
+
+        $matcher = CoreRuleSetMatcher::fromRuleFiles(ParanoiaLevel::Level1, $rulesDir);
+        $matcher->useCompiledDataCache($compiledDataCache);
+
+        // Zero rules despite rule files present must not silently disable the
+        // CRS - the source is reparsed and the rule still matches.
+        $this->assertTrue($matcher->match(new ServerRequest('GET', '/admin'))->isMatch());
+    }
+
     public function testEagerConstructionIgnoresTheCompiledDataCache(): void
     {
         [$root] = $this->rulesDirectory();
