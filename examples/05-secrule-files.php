@@ -92,7 +92,7 @@ $config->enableResponseHeaders();
 $config->blocklists->addRule(new BlocklistRule('owasp', new CoreRuleSetMatcher($coreRuleSet)));
 
 // Enable diagnostics header to see which rule matched
-$config->enableOwaspDiagnosticsHeader();
+$config->enableDiagnosticsHeaders();
 
 $firewall = new Firewall($config);
 

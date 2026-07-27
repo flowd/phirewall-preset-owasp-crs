@@ -140,7 +140,7 @@ $diagnostics = new DiagnosticsCounters();
 $config = new Config(new InMemoryCache(), new DiagnosticsDispatcher($diagnostics));
 $config->enableResponseHeaders();
 $config->blocklists->addRule(new BlocklistRule('xss-prevention', new CoreRuleSetMatcher($coreRuleSet)));
-$config->enableOwaspDiagnosticsHeader();
+$config->enableDiagnosticsHeaders();
 
 $firewall = new Firewall($config);
 

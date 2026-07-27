@@ -39,7 +39,7 @@ final class FirewallOwaspDiagnosticsHeaderTest extends TestCase
     public function testDiagnosticsHeaderIsPresentWhenEnabled(): void
     {
         [$config, $firewall] = $this->buildFirewallWithOwasp();
-        $config->enableDiagnosticsHeaders(true);
+        $config->enableDiagnosticsHeaders();
         $serverRequest = new ServerRequest('GET', '/admin');
         $firewallResult = $firewall->decide($serverRequest);
         $this->assertTrue($firewallResult->isBlocked());
