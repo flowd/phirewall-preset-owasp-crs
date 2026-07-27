@@ -140,6 +140,33 @@ final class CoreRuleSetMatcherLazyTest extends TestCase
         $this->assertTrue($matcher->match(new ServerRequest('GET', '/admin'))->isMatch());
     }
 
+    public function testWrongElementTypesInArtifactFallBackToReparsing(): void
+    {
+        [$root] = $this->rulesDirectory();
+        $rulesDir = $root->url() . '/rules';
+        $cacheDirectory = vfsStream::newDirectory('cache')->at($root);
+        $compiledDataCache = new CompiledDataCache($cacheDirectory->url());
+
+        // A rule with the right keys/top-level types but a non-string element in
+        // "variables" - type-invalid, so fromArray() must reject it.
+        $ruleFiles = \Flowd\PhirewallPresetOwaspCrs\RuleSetLoader::ruleFiles(ParanoiaLevel::Level1, $rulesDir);
+        $identifier = 'owasp-crs-v1-pl' . ParanoiaLevel::Level1->value . '-' . substr(sha1(implode('|', $ruleFiles)), 0, 12);
+        $compiledDataCache->load($identifier, $ruleFiles, static fn(): array => [[
+            'id' => 400001,
+            'variables' => [123],
+            'operator' => '@rx',
+            'operatorArgument' => '^/admin',
+            'actions' => ['deny' => true],
+            'contextFolder' => null,
+        ]]);
+        CompiledDataCache::clearProcessCache();
+
+        $matcher = CoreRuleSetMatcher::fromRuleFiles(ParanoiaLevel::Level1, $rulesDir);
+        $matcher->useCompiledDataCache($compiledDataCache);
+
+        $this->assertTrue($matcher->match(new ServerRequest('GET', '/admin'))->isMatch());
+    }
+
     public function testEagerConstructionIgnoresTheCompiledDataCache(): void
     {
         [$root] = $this->rulesDirectory();

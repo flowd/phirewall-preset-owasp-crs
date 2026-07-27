@@ -84,9 +84,28 @@ final readonly class CoreRule
             throw new \InvalidArgumentException('Compiled CRS rule data has an unexpected shape.');
         }
 
-        /** @var list<string> $variables */
-        /** @var array<string, int|string|bool> $actions */
-        return new self($id, $variables, $operator, $operatorArgument, $actions, $contextFolder);
+        // Validate element types too: a wrong-typed value (e.g. a non-bool
+        // actions['deny']) would otherwise hydrate a rule that never matches,
+        // silently bypassing the fallback (fail-open).
+        $validatedVariables = [];
+        foreach ($variables as $variable) {
+            if (!is_string($variable)) {
+                throw new \InvalidArgumentException('Compiled CRS rule "variables" must be a list of strings.');
+            }
+
+            $validatedVariables[] = $variable;
+        }
+
+        $validatedActions = [];
+        foreach ($actions as $actionName => $actionValue) {
+            if (!is_string($actionName) || (!is_int($actionValue) && !is_string($actionValue) && !is_bool($actionValue))) {
+                throw new \InvalidArgumentException('Compiled CRS rule "actions" must map string keys to int/string/bool values.');
+            }
+
+            $validatedActions[$actionName] = $actionValue;
+        }
+
+        return new self($id, $validatedVariables, $operator, $operatorArgument, $validatedActions, $contextFolder);
     }
 
     /**
