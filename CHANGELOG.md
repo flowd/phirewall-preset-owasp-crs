@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`CoreRuleSetMatcher` emits `diagnostic_headers` metadata.** A matched rule now carries `diagnostic_headers` (`['X-Phirewall-Owasp-Rule' => <id>]`) alongside the existing `owasp_rule_id` and `msg` metadata. phirewall 0.9 copies these onto the blocked response when `Config::enableDiagnosticsHeaders()` is active - the generic replacement for the hardcoded OWASP header that 0.9 removed - and it works wherever the matcher decides the block (blocklist rule or fail2ban filter). `owasp_rule_id` (int) and `msg` remain available as structured metadata for event listeners.
+- **Lazy rule loading with compiled-data caching.** `CoreRuleSetMatcher::fromRuleFiles($paranoiaLevel, $rulesDirectory, $maxValuesPerCrsVariable)` defers parsing to the first evaluated request, and when the evaluating `Config` carries a compiled-data cache (`Config::setCompiledDataCache()`), the parsed rules load from an OPcache-served compiled artifact instead of being re-parsed on every request. `enable()`/`disable()` calls made before the first use are queued and applied once the rules are loaded. `Presets::blocklist()` and `Presets::fail2ban()` now build lazily; a matcher constructed with an already parsed `CoreRuleSet` behaves as before and ignores the cache. `CoreRule` gained `toArray()`/`fromArray()` for the artifact round-trip, and the artifact identifier carries a format version so an upgrade that changes that shape rebuilds automatically.
 
 ### Changed
 

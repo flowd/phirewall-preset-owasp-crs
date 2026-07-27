@@ -41,6 +41,38 @@ final readonly class CoreRule
     }
 
     /**
+     * The rule as var_export-able plain data for {@see \Flowd\Phirewall\Support\CompiledDataCache}.
+     *
+     * @return array{id: int, variables: list<string>, operator: string, operatorArgument: string, actions: array<string, int|string|bool>, contextFolder: ?string}
+     */
+    public function toArray(): array
+    {
+        return [
+            'id' => $this->id,
+            'variables' => $this->variables,
+            'operator' => $this->operator,
+            'operatorArgument' => $this->operatorArgument,
+            'actions' => $this->actions,
+            'contextFolder' => $this->contextFolder,
+        ];
+    }
+
+    /**
+     * @param array{id: int, variables: list<string>, operator: string, operatorArgument: string, actions: array<string, int|string|bool>, contextFolder: ?string} $data
+     */
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            $data['id'],
+            $data['variables'],
+            $data['operator'],
+            $data['operatorArgument'],
+            $data['actions'],
+            $data['contextFolder'],
+        );
+    }
+
+    /**
      * Evaluate the rule against the request.
      *
      * When evaluating many rules for the same request, pass a shared {@see RequestVariableValues}

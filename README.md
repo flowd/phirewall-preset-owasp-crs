@@ -94,6 +94,35 @@ levels against your real traffic. The fail2ban preset does not soften this - it 
 the same matches and merely adds a key ban on top - so a higher level is not a safer
 choice there.
 
+### Skipping the per-request parse
+
+Parsing the CRS rule files costs several milliseconds and, under PHP-FPM, would
+run on every request. Both presets therefore load lazily: the parse happens on
+the first evaluated request. To also skip that first parse per process, give
+your `Config` a compiled-data cache (phirewall `^0.9`) - the parsed rules are
+then served from an OPcache-backed artifact and re-parsed only when a rule file
+changes:
+
+```php
+use Flowd\Phirewall\Support\CompiledDataCache;
+
+$config->setCompiledDataCache(new CompiledDataCache('/path/to/var/cache/phirewall'));
+$config = $config->with(Presets::blocklist(ParanoiaLevel::Level1));
+```
+
+For manual wiring use the lazy factory; rule toggles before the first request
+are queued and applied once the rules are loaded:
+
+```php
+$matcher = CoreRuleSetMatcher::fromRuleFiles(ParanoiaLevel::Level1);
+$matcher->disable(942340);
+
+$config->blocklists->addRule(new BlocklistRule('owasp', $matcher));
+```
+
+A matcher constructed with an already parsed `CoreRuleSet` keeps the eager
+behaviour and ignores the cache.
+
 ## What is included (and what is not)
 
 Phirewall's SecRule engine implements a pragmatic subset of ModSecurity. The import

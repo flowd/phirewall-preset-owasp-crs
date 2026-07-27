@@ -38,7 +38,7 @@ final class Presets
         return self::layer(static function (Config $config) use ($paranoiaLevel, $rulesDirectory): void {
             $config->blocklists->addRule(new BlocklistRule(
                 self::BLOCKLIST_RULE_NAME,
-                new CoreRuleSetMatcher(self::coreRuleSet($paranoiaLevel, $rulesDirectory)),
+                CoreRuleSetMatcher::fromRuleFiles($paranoiaLevel, $rulesDirectory),
             ));
         });
     }
@@ -68,7 +68,7 @@ final class Presets
                 $threshold,
                 $period,
                 $ban,
-                new CoreRuleSetMatcher(self::coreRuleSet($paranoiaLevel, $rulesDirectory)),
+                CoreRuleSetMatcher::fromRuleFiles($paranoiaLevel, $rulesDirectory),
                 null,
             ));
         });
