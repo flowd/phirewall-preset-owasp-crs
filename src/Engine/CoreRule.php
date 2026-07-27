@@ -41,6 +41,74 @@ final readonly class CoreRule
     }
 
     /**
+     * The rule as var_export-able plain data for {@see \Flowd\Phirewall\Support\CompiledDataCache}.
+     *
+     * @return array{id: int, variables: list<string>, operator: string, operatorArgument: string, actions: array<string, int|string|bool>, contextFolder: ?string}
+     */
+    public function toArray(): array
+    {
+        return [
+            'id' => $this->id,
+            'variables' => $this->variables,
+            'operator' => $this->operator,
+            'operatorArgument' => $this->operatorArgument,
+            'actions' => $this->actions,
+            'contextFolder' => $this->contextFolder,
+        ];
+    }
+
+    /**
+     * Rebuild a rule from compiled-cache data. Reads defensively (the input is
+     * a deserialized artifact, not necessarily trustworthy): missing keys use
+     * `??` rather than emitting undefined-index warnings, and a value of the
+     * wrong type raises an `InvalidArgumentException` for the caller to handle.
+     *
+     * @param array<mixed> $data
+     */
+    public static function fromArray(array $data): self
+    {
+        $id = $data['id'] ?? null;
+        $variables = $data['variables'] ?? null;
+        $operator = $data['operator'] ?? null;
+        $operatorArgument = $data['operatorArgument'] ?? null;
+        $actions = $data['actions'] ?? null;
+        $contextFolder = $data['contextFolder'] ?? null;
+
+        if (!is_int($id)
+            || !is_array($variables)
+            || !is_string($operator)
+            || !is_string($operatorArgument)
+            || !is_array($actions)
+            || ($contextFolder !== null && !is_string($contextFolder))
+        ) {
+            throw new \InvalidArgumentException('Compiled CRS rule data has an unexpected shape.');
+        }
+
+        // Validate element types too: a wrong-typed value (e.g. a non-bool
+        // actions['deny']) would otherwise hydrate a rule that never matches,
+        // silently bypassing the fallback (fail-open).
+        $validatedVariables = [];
+        foreach ($variables as $variable) {
+            if (!is_string($variable)) {
+                throw new \InvalidArgumentException('Compiled CRS rule "variables" must be a list of strings.');
+            }
+
+            $validatedVariables[] = $variable;
+        }
+
+        $validatedActions = [];
+        foreach ($actions as $actionName => $actionValue) {
+            if (!is_string($actionName) || (!is_int($actionValue) && !is_string($actionValue) && !is_bool($actionValue))) {
+                throw new \InvalidArgumentException('Compiled CRS rule "actions" must map string keys to int/string/bool values.');
+            }
+
+            $validatedActions[$actionName] = $actionValue;
+        }
+
+        return new self($id, $validatedVariables, $operator, $operatorArgument, $validatedActions, $contextFolder);
+    }
+
+    /**
      * Evaluate the rule against the request.
      *
      * When evaluating many rules for the same request, pass a shared {@see RequestVariableValues}
