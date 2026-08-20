@@ -164,9 +164,12 @@ The command downloads the release tarball, filters the rules as described above,
 splits them per paranoia level into `resources/rules/*.plN.conf`, copies referenced
 `.data` files and writes `manifest.json`.
 
-The scheduled `CRS Update` GitHub Actions workflow runs the import weekly, executes
-the test suite against the regenerated rules and opens a pull request when a new CRS
-release was imported. Releases of this package are tagged manually after review.
+The scheduled `CRS Update` GitHub Actions workflow runs the import weekly and opens a
+pull request when a new CRS release was imported. The test suite runs in that pull
+request, where the required `CI passed` check gates the merge, so an import that breaks
+the suite still surfaces as a reviewable PR. Because the PR is created with the workflow
+`GITHUB_TOKEN`, its CI checks must be triggered manually once (close and reopen the PR).
+Releases of this package are tagged manually after review.
 
 ## Development
 
