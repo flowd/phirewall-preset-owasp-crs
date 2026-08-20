@@ -91,3 +91,20 @@ jobs:
             php "$example"
             echo "::endgroup::"
           done
+
+  # Single stable check name for branch protection: require only "CI passed"
+  # instead of every matrix job, so the required-checks list survives matrix changes.
+  ci-passed:
+    name: CI passed
+    runs-on: ubuntu-latest
+    needs: [tests, examples]
+    if: always()
+    steps:
+      - name: Fail when a needed job did not succeed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: |
+          echo "A needed job failed, was cancelled or was skipped."
+          exit 1
+
+      - name: Confirm success
+        run: echo "All needed jobs succeeded."
