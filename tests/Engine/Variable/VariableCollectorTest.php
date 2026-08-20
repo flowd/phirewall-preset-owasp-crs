@@ -152,6 +152,23 @@ final class VariableCollectorTest extends TestCase
         $this->assertSame(['abc', 'chocolate'], $result);
     }
 
+    public function testRequestCookiesCollectorFlattensNestedCookieArrays(): void
+    {
+        // PHP parses a bracketed cookie name (Cookie: foo[a]=1; foo[b][c]=payload) into a nested
+        // array, exactly like query parameters. The collector must collect the leaf values instead
+        // of casting the array (which would raise a warning and scan the literal string "Array").
+        $collector = new RequestCookiesCollector();
+        $request = (new ServerRequest('GET', '/'))
+            ->withCookieParams([
+                'session' => 'abc',
+                'foo' => ['a' => '1', 'b' => ['c' => 'payload']],
+            ]);
+
+        $result = $collector->collect($request);
+
+        $this->assertSame(['abc', '1', 'payload'], $result);
+    }
+
     public function testRequestCookiesNamesCollectorReturnsCookieKeys(): void
     {
         $collector = new RequestCookiesNamesCollector();
