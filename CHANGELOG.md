@@ -5,6 +5,12 @@ All notable changes to this package are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- **Nested cookie params no longer break `REQUEST_COOKIES` collection.** PHP parses a bracketed cookie name (`Cookie: foo[a]=1`) into a nested array, exactly like query parameters. Casting that array raised an "Array to string conversion" warning (fatal under strict production error handlers) and scanned the literal string `Array` instead of the cookie payload. The collector now flattens cookie params to their scalar leaf values, so nested cookie payloads are scanned by the rules.
+
 ## 0.4.0 - 2026-07-27
 
 ### Added
