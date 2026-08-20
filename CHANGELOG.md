@@ -5,7 +5,11 @@ All notable changes to this package are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.4.1 - 2026-08-20
+
+### Changed
+
+- **Updated the bundled OWASP Core Rule Set from v4.27.0 to v4.29.0.** Automated import via the scheduled `CRS Update` workflow; the rules are filtered and split per paranoia level as before. Upstream changes are listed in the [CRS release notes](https://github.com/coreruleset/coreruleset/releases).
 
 ### Fixed
 
