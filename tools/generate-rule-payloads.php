@@ -456,6 +456,10 @@ function requestFor(string $vector, string $payload): array
                 return [$vector, $base->withHeader(substr($vector, strlen('header:')), $payload)];
             }
 
+            if (str_starts_with($vector, 'cookie:')) {
+                return [$vector, $base->withCookieParams([substr($vector, strlen('cookie:')) => $payload])];
+            }
+
             return [$vector, $base];
     }
 }
@@ -570,6 +574,17 @@ $manualOverrides = [
     // Java serialized-object header: the engine compiles @rx with the /u flag, so the
     // signature bytes must be supplied as their UTF-8 code points (U+00AC U+00ED ...).
     944200 => ['vector' => 'args', 'payload' => "\u{00AC}\u{00ED}\u{0000}\u{0005}"],
+    // Empty-header rules (@rx ^$): the engine wraps the pattern as ~^$~u (no PCRE_DOLLAR_ENDONLY,
+    // matching ModSecurity), so $ matches before a trailing newline and a lone-LF header value
+    // matches while surviving the empty-value skip (it is not === '').
+    920290 => ['vector' => 'header:Host', 'payload' => "\n"],
+    920330 => ['vector' => 'header_ua', 'payload' => "\n"],
+    // OS command injection on the User-Agent; the sampler cannot reach a valid command
+    // token in the huge alternation, so a canonical shell substitution is supplied.
+    932239 => ['vector' => 'header_ua', 'payload' => '$(id)'],
+    // Cookie named "$Version" with value "1"; the auto 'cookie' vector uses a fixed name,
+    // so a named-cookie vector is needed for this name-pattern selector.
+    921250 => ['vector' => 'cookie:$Version', 'payload' => '1'],
 ];
 
 /**
@@ -581,7 +596,9 @@ $manualOverrides = [
  */
 $documentedUnreachable = [
     920260 => 'REQUEST_URI percent-encoding rewrites the literal "%uff"; REQUEST_BODY has no collector.',
+    920610 => 'A literal "#" is the URI fragment delimiter and is stripped from a normalized PSR-7 REQUEST_URI.',
     921190 => 'A newline cannot survive in a PSR-7 path basename (REQUEST_FILENAME).',
+    921240 => 'A literal "|" is percent-encoded to %7C in a normalized PSR-7 REQUEST_URI, so the "unix:...|" pattern cannot match.',
     931131 => 'A "scheme://host" string cannot appear in a basename (REQUEST_FILENAME).',
 ];
 

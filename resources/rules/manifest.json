@@ -1,18 +1,23 @@
 {
     "crsVersion": "v4.29.0",
-    "importedAt": "2026-08-20T18:34:46+00:00",
+    "importedAt": "2026-08-26T21:13:19+00:00",
     "ruleCountsByParanoiaLevel": {
-        "1": 101,
-        "2": 56,
-        "3": 23,
+        "1": 114,
+        "2": 63,
+        "3": 25,
         "4": 5
+    },
+    "ruleCountsBySeverity": {
+        "CRITICAL": 196,
+        "NOTICE": 1,
+        "WARNING": 10
     },
     "droppedRuleCounts": {
         "chained": 53,
         "nonBlocking": 148,
         "unparseable": 14,
         "unsupportedOperator": 36,
-        "unsupportedVariables": 27
+        "unsupportedVariables": 5
     },
     "sourceFiles": [
         "REQUEST-901-INITIALIZATION.conf",
@@ -40,6 +45,7 @@
         "lfi-os-files.data",
         "php-variables.data",
         "restricted-files.data",
+        "scanners-user-agents.data",
         "ssrf-no-scheme.data",
         "ssrf.data",
         "unix-shell.data",

@@ -126,9 +126,23 @@ final class EveryRulePayloadTest extends TestCase
         }
     }
 
+    /**
+     * Build the request for a payload's injection vector. Must mirror
+     * {@see requestFor()} in tools/generate-rule-payloads.php so a fixture the
+     * generator verified reproduces here; the named-header vectors in particular
+     * (`header:<NAME>`, `header_content_type`) exist only for kept header rules.
+     */
     private function buildRequest(string $vector, string $payload): ServerRequestInterface
     {
         $base = new ServerRequest('GET', 'https://example.test/');
+
+        if (str_starts_with($vector, 'header:')) {
+            return $base->withHeader(substr($vector, strlen('header:')), $payload);
+        }
+
+        if (str_starts_with($vector, 'cookie:')) {
+            return $base->withCookieParams([substr($vector, strlen('cookie:')) => $payload]);
+        }
 
         return match ($vector) {
             'args' => $base->withQueryParams(['p' => $payload]),
@@ -140,6 +154,7 @@ final class EveryRulePayloadTest extends TestCase
             'cookie' => $base->withCookieParams(['c' => $payload]),
             'header_referer' => $base->withHeader('Referer', $payload),
             'header_ua' => $base->withHeader('User-Agent', $payload),
+            'header_content_type' => $base->withHeader('Content-Type', $payload),
             'method' => new ServerRequest($payload !== '' ? $payload : 'GET', 'https://example.test/'),
             default => $base,
         };
