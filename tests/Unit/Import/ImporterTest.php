@@ -113,6 +113,17 @@ final class ImporterTest extends TestCase
         $this->assertSame('2026-06-12T00:00:00+00:00', $manifest->importedAt);
         $this->assertSame([1 => 2, 2 => 1, 3 => 0, 4 => 0], $manifest->ruleCountsByParanoiaLevel);
         $this->assertSame(['restricted-files.data'], $manifest->dataFiles);
+        $this->assertSame(array_sum($manifest->ruleCountsByParanoiaLevel), array_sum($manifest->ruleCountsBySeverity));
+    }
+
+    public function testManifestWithoutSeverityCountsReadsAsEmpty(): void
+    {
+        $manifest = Manifest::fromArray([
+            'crsVersion' => 'v4.0.0',
+            'importedAt' => '2026-06-12T00:00:00+00:00',
+        ]);
+
+        $this->assertSame([], $manifest->ruleCountsBySeverity, 'Pre-0.5 manifests without the field stay readable');
     }
 
     public function testRemovesFilesFromAPreviousImport(): void

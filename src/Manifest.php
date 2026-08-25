@@ -14,6 +14,7 @@ final readonly class Manifest
      * @param array<string, int> $droppedRuleCounts
      * @param list<string> $sourceFiles
      * @param list<string> $dataFiles
+     * @param array<string, int> $ruleCountsBySeverity Kept rule counts keyed by severity name; empty for pre-0.5 manifests
      */
     public function __construct(
         public string $crsVersion,
@@ -22,6 +23,7 @@ final readonly class Manifest
         public array $droppedRuleCounts,
         public array $sourceFiles,
         public array $dataFiles,
+        public array $ruleCountsBySeverity = [],
     ) {
     }
 
@@ -73,6 +75,13 @@ final readonly class Manifest
             }
         }
 
+        $ruleCountsBySeverity = [];
+        foreach (is_array($data['ruleCountsBySeverity'] ?? null) ? $data['ruleCountsBySeverity'] : [] as $severity => $count) {
+            if (is_string($severity) && is_int($count)) {
+                $ruleCountsBySeverity[$severity] = $count;
+            }
+        }
+
         return new self(
             $crsVersion,
             $importedAt,
@@ -80,6 +89,7 @@ final readonly class Manifest
             $droppedRuleCounts,
             self::stringList($data['sourceFiles'] ?? null),
             self::stringList($data['dataFiles'] ?? null),
+            $ruleCountsBySeverity,
         );
     }
 

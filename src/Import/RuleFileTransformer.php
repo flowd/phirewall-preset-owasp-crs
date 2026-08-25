@@ -6,6 +6,7 @@ namespace Flowd\PhirewallPresetOwaspCrs\Import;
 
 use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRule;
 use Flowd\PhirewallPresetOwaspCrs\Engine\SecRuleParser;
+use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\TargetSelector;
 
 /**
  * Filters one upstream CRS rule file down to the rules the Phirewall SecRule
@@ -14,10 +15,10 @@ use Flowd\PhirewallPresetOwaspCrs\Engine\SecRuleParser;
  * A rule is kept when it parses, is a blocking rule (deny or block action),
  * uses a supported operator, is not part of a chain (the engine evaluates
  * rules independently, so keeping only a chain's first condition would
- * over-block) and inspects at least one supported variable. Unsupported
- * variables within a kept rule (for example selector variables such as
- * "REQUEST_HEADERS:User-Agent") collect no values at runtime, so the rule
- * evaluates against its supported variables only.
+ * over-block) and inspects at least one supported target (including named
+ * selectors such as "REQUEST_HEADERS:User-Agent"). Unsupported selectors
+ * within a kept rule (for example "XML:/*") collect no values at runtime, so
+ * the rule evaluates against its supported targets only.
  */
 final readonly class RuleFileTransformer
 {
@@ -45,24 +46,6 @@ final readonly class RuleFileTransformer
         '@pmfromfile',
     ];
 
-    /**
-     * Variables implemented by Flowd\PhirewallPresetOwaspCrs\Engine\Variable\VariableCollectorFactory.
-     */
-    private const SUPPORTED_VARIABLES = [
-        'REQUEST_URI',
-        'REQUEST_METHOD',
-        'QUERY_STRING',
-        'ARGS',
-        'ARGS_NAMES',
-        'REQUEST_COOKIES',
-        'REQUEST_COOKIES_NAMES',
-        'REQUEST_HEADERS',
-        'REQUEST_HEADERS_NAMES',
-        'REQUEST_FILENAME',
-    ];
-
-    private const PARANOIA_LEVEL_TAG_PATTERN = '/tag:[\'"]paranoia-level\/([1-4])[\'"]/';
-
     private LogicalLineSplitter $logicalLineSplitter;
 
     private SecRuleParser $secRuleParser;
@@ -78,6 +61,7 @@ final readonly class RuleFileTransformer
         $ruleLinesByParanoiaLevel = [];
         $referencedDataFiles = [];
         $droppedRuleCounts = [];
+        $keptRuleCountsBySeverity = [];
         $chainContinuationExpected = false;
 
         foreach ($this->logicalLineSplitter->split($rulesText) as $logicalLine) {
@@ -121,40 +105,37 @@ final readonly class RuleFileTransformer
                 $referencedDataFiles[] = basename($coreRule->operatorArgument);
             }
 
-            $paranoiaLevel = $this->paranoiaLevelOf($logicalLine);
-            $ruleLinesByParanoiaLevel[$paranoiaLevel][] = $logicalLine;
+            $severityKey = $coreRule->severity ?? 'NONE';
+            $keptRuleCountsBySeverity[$severityKey] = ($keptRuleCountsBySeverity[$severityKey] ?? 0) + 1;
+
+            $ruleLinesByParanoiaLevel[$coreRule->paranoiaLevel][] = $logicalLine;
         }
 
         ksort($ruleLinesByParanoiaLevel);
+        ksort($keptRuleCountsBySeverity);
 
         return new FileTransformation(
             $ruleLinesByParanoiaLevel,
             array_values(array_unique($referencedDataFiles)),
             $droppedRuleCounts,
+            $keptRuleCountsBySeverity,
         );
     }
 
+    /**
+     * Whether the rule has at least one positive target the engine can collect;
+     * negated selectors are exclusions and collect nothing on their own.
+     */
     private function inspectsSupportedVariable(CoreRule $coreRule): bool
     {
         foreach ($coreRule->variables as $variable) {
-            if (in_array($variable, self::SUPPORTED_VARIABLES, true)) {
+            $selector = TargetSelector::tryParse($variable);
+            if ($selector instanceof TargetSelector && !$selector->negated) {
                 return true;
             }
         }
 
         return false;
-    }
-
-    /**
-     * Paranoia level from the rule's "paranoia-level/N" tag; untagged rules count as level 1.
-     */
-    private function paranoiaLevelOf(string $logicalLine): int
-    {
-        if (preg_match(self::PARANOIA_LEVEL_TAG_PATTERN, $logicalLine, $matches) === 1) {
-            return (int)$matches[1];
-        }
-
-        return 1;
     }
 
     /**

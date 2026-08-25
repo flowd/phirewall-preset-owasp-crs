@@ -15,6 +15,7 @@ final readonly class ImportReport
      * @param list<string> $sourceFiles Upstream rule files that were processed
      * @param list<string> $dataFiles Data files copied for @pmFromFile rules
      * @param list<string> $generatedFiles File names written to the rules directory
+     * @param array<string, int> $ruleCountsBySeverity Kept rule counts keyed by severity name ('NONE' when missing)
      */
     public function __construct(
         public string $crsVersion,
@@ -24,6 +25,7 @@ final readonly class ImportReport
         public array $sourceFiles,
         public array $dataFiles,
         public array $generatedFiles,
+        public array $ruleCountsBySeverity = [],
     ) {
     }
 
@@ -46,6 +48,7 @@ final readonly class ImportReport
             'crsVersion' => $this->crsVersion,
             'importedAt' => $this->importedAt,
             'ruleCountsByParanoiaLevel' => $this->ruleCountsByParanoiaLevel,
+            'ruleCountsBySeverity' => $this->ruleCountsBySeverity,
             'droppedRuleCounts' => $this->droppedRuleCounts,
             'sourceFiles' => $this->sourceFiles,
             'dataFiles' => $this->dataFiles,

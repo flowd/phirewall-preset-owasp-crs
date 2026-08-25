@@ -82,10 +82,29 @@ final class RuleFileTransformerTest extends TestCase
     public function testDropsRulesWhoseVariablesAreAllUnsupported(): void
     {
         $fileTransformation = $this->transformer()->transform(
-            'SecRule REQUEST_HEADERS:User-Agent "@rx scanner" "id:913100,phase:1,block"',
+            'SecRule XML:/*|REQUEST_BODY "@rx scanner" "id:913100,phase:1,block"',
         );
 
         $this->assertSame(0, $fileTransformation->keptRuleCount());
+        $this->assertSame([RuleFileTransformer::REASON_UNSUPPORTED_VARIABLES => 1], $fileTransformation->droppedRuleCounts);
+    }
+
+    public function testKeepsRulesTargetingOnlyANamedHeaderSelector(): void
+    {
+        $fileTransformation = $this->transformer()->transform(
+            'SecRule REQUEST_HEADERS:User-Agent "@rx scanner" "id:913100,phase:1,block"',
+        );
+
+        $this->assertSame(1, $fileTransformation->keptRuleCount(), 'Named header selectors are collectable targets');
+    }
+
+    public function testDropsRulesWhoseOnlySelectorsAreNegated(): void
+    {
+        $fileTransformation = $this->transformer()->transform(
+            'SecRule !REQUEST_HEADERS:Cookie "@rx evil" "id:913101,phase:1,block"',
+        );
+
+        $this->assertSame(0, $fileTransformation->keptRuleCount(), 'A negated selector alone collects nothing');
         $this->assertSame([RuleFileTransformer::REASON_UNSUPPORTED_VARIABLES => 1], $fileTransformation->droppedRuleCounts);
     }
 
@@ -96,6 +115,21 @@ final class RuleFileTransformerTest extends TestCase
         );
 
         $this->assertSame(1, $fileTransformation->keptRuleCount());
+    }
+
+    public function testTalliesKeptRulesBySeverity(): void
+    {
+        $fileTransformation = $this->transformer()->transform(
+            'SecRule ARGS "@rx one" "id:942300,phase:2,block,severity:\'CRITICAL\'"' . "\n"
+            . 'SecRule ARGS "@rx two" "id:942301,phase:2,block,severity:\'WARNING\'"' . "\n"
+            . 'SecRule ARGS "@rx three" "id:942302,phase:2,block,severity:\'WARNING\'"' . "\n"
+            . 'SecRule ARGS "@rx four" "id:942303,phase:2,block"',
+        );
+
+        $this->assertSame(
+            ['CRITICAL' => 1, 'NONE' => 1, 'WARNING' => 2],
+            $fileTransformation->keptRuleCountsBySeverity,
+        );
     }
 
     public function testDropsRulesWithoutAnId(): void
