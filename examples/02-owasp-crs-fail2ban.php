@@ -1,16 +1,13 @@
 <?php
 
 /**
- * Example 02: Block CRS matches and ban repeat offenders (fail2ban preset).
+ * Example 02: Block scoring requests and ban repeat offenders (fail2ban preset).
  *
- * A CRS match marks a request as malicious, so the fail2ban preset blocks every
- * matching request (a 403) - the same as the blocklist preset. On top of that it
- * counts matches per client key (the IP by default) and, once the threshold is
- * reached, bans the key for the ban duration, so all further traffic from that
+ * A request whose accumulated CRS anomaly score reaches the anomaly threshold is
+ * blocked (a 403) - the same as the blocklist preset. On top of that the preset
+ * counts such requests per client key (the IP by default) and, once threshold
+ * is reached, bans the key for the ban duration, so all further traffic from that
  * key is blocked until the ban expires.
- *
- * Behaviour change in phirewall 0.8: matches below the threshold are now blocked.
- * Under 0.7 they passed through and only counted.
  *
  * Run: php examples/02-owasp-crs-fail2ban.php
  */

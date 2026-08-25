@@ -9,9 +9,11 @@ This package provides two things:
    evaluator for ModSecurity-style `SecRule` directives, usable with any
    ruleset. It was extracted from the core `flowd/phirewall` package in 0.6.
 2. **Ready-made CRS presets** - a pre-filtered, per-paranoia-level snapshot of
-   the CRS request rules, exposed as `Config` overlays:
-   - **Blocklist preset** - block every request that matches a CRS rule.
-   - **Fail2Ban preset** - block every CRS match and additionally ban a client key that keeps matching.
+   the CRS request rules, exposed as `Config` overlays. Evaluation uses CRS-style
+   [anomaly scoring](#anomaly-scoring): every matching rule contributes its severity
+   score, and the request is blocked once the accumulated score reaches the threshold.
+   - **Blocklist preset** - block every request whose anomaly score reaches the threshold.
+   - **Fail2Ban preset** - block scoring requests and additionally ban a client key that keeps scoring.
 
 ## Installation
 
@@ -35,10 +37,11 @@ $config = $config->with(
 );
 ```
 
-Want to also ban probing clients, not just block their matching requests? Use the fail2ban
-preset. It blocks every CRS match like the blocklist, and additionally bans the client key
-(the IP by default) once it reaches the threshold, so all further traffic from that key is
-blocked until the ban expires:
+Want to also ban probing clients, not just block their scoring requests? Use the fail2ban
+preset. It blocks every request whose anomaly score reaches the threshold, like the blocklist,
+and additionally bans the client key (the IP by default) once it produced `threshold`
+such requests within `period` seconds, so all further traffic from that key is blocked
+until the ban expires:
 
 ```php
 $config = $config->with(
@@ -46,9 +49,20 @@ $config = $config->with(
 );
 ```
 
-> **Behaviour change in phirewall 0.8.** The fail2ban preset now blocks *every* CRS match
-> (a 403), the same as the blocklist, and the threshold only governs the additional key ban.
-> Under 0.7 a match below the threshold passed through and merely counted. See the CHANGELOG.
+Both presets accept an `anomalyThreshold` (default 5, the CRS standard), a `configure`
+closure for [tuning](#excluding-parameters-from-rules-false-positives) and a PSR-3
+`logger` for [match logging](#logging):
+
+```php
+$config = $config->with(Presets::blocklist(
+    ParanoiaLevel::Level1,
+    anomalyThreshold: 5,
+    configure: static function (CoreRuleSetMatcher $matcher): void {
+        $matcher->excludeTarget('ARGS:/^utm_/');
+    },
+    logger: $logger,
+));
+```
 
 For manual wiring (custom rule name, enabling/disabling single CRS rule ids), get the
 raw rule set:
@@ -63,6 +77,121 @@ $config->blocklists->addRule(new BlocklistRule('my-crs-rule', new CoreRuleSetMat
 ```
 
 `Presets::crsVersion()` returns the bundled upstream release tag.
+
+### Anomaly scoring
+
+Like upstream CRS, every matching rule contributes its severity score to the request's
+anomaly score, and the request is blocked once the accumulated score **reaches** the
+threshold (`score >= threshold`):
+
+| Severity | Score |
+| --- | --- |
+| CRITICAL | 5 |
+| ERROR | 4 |
+| WARNING | 3 |
+| NOTICE | 2 |
+
+The default threshold is 5, the CRS standard inbound threshold. In the bundled CRS
+snapshot most rules are CRITICAL and still block on their own; WARNING rules (for
+example the `942430` restricted-character checks, a classic source of false positives)
+no longer block alone - two of them together do. `anomalyThreshold: 1` restores
+block-on-first-match behaviour; raising the threshold above 5 substantially increases
+the risk of attacks passing.
+
+Details:
+
+- A rule without a recognizable `severity` action scores 5 (CRITICAL) - a bare
+  `deny` rule in a custom ruleset still blocks alone at the default threshold.
+- Evaluation stops once the threshold is reached. `CoreRuleSet::evaluate()` accepts
+  `stopWhenThresholdReached: false` to evaluate every rule for complete diagnostics.
+- Fail-closed decisions bypass the threshold: a variable truncated at the collection
+  cap or a PCRE engine error on a value blocks immediately, whatever the score.
+- Scores never accumulate across requests. The fail2ban preset counts a request
+  toward the ban whenever CRS blocks it - when its score reaches the threshold or
+  the request fails closed.
+
+A blocked request's `MatchResult` metadata always carries `owasp_anomaly_score`,
+`owasp_anomaly_threshold`, `owasp_rule_ids` (comma-separated) and `owasp_rule_id`
+(first match); it also carries `msg` and `owasp_log_data` when the first matching
+rule provides them, and `owasp_fail_closed` on a fail-closed block.
+With `Config::enableDiagnosticsHeaders()` blocked responses carry
+`X-Phirewall-Owasp-Rule` (up to 10 rule ids, then `,+N`) and
+`X-Phirewall-Owasp-Score` (`score/threshold`).
+
+### Excluding parameters from rules (false positives)
+
+Marketing and tracking parameters (`utm_*`, `fbclid`, ...) regularly carry values
+that look like attack payloads to CRS rules. Instead of disabling whole rules,
+exclude the parameter from inspection - globally, per rule id (CRS
+`SecRuleUpdateTargetById` style) or per rule tag:
+
+```php
+$coreRuleSet = Presets::coreRuleSet(ParanoiaLevel::Level1)
+    ->excludeTarget('ARGS:/^utm_/')            // all rules ignore utm_* values
+    ->excludeTarget('ARGS_NAMES:/^utm_/')      // ... and the utm_* parameter names
+    ->excludeTargetById(942431, 'ARGS:fbclid') // one rule ignores one parameter
+    ->excludeTargetByTag('attack-sqli', 'ARGS:comment');
+```
+
+Selector forms: bare variable (`ARGS`), exact name (`ARGS:utm_source`) or name
+pattern (`ARGS:/^utm_/`). Header names match case-insensitively, argument and
+cookie names case-sensitively. Excluding a parameter's value usually wants its
+name excluded too (the `ARGS_NAMES` twin), since rules also inspect parameter names.
+
+The same methods exist on `CoreRuleSetMatcher` (queued until the rules load) and are
+reachable through the presets' `configure:` closure. Exclusions are runtime tuning:
+they never enter the compiled-data cache artifact, and they cannot lift the
+collection cap - a request padded past the cap still fails closed.
+
+**Limitation:** exclusions do not rewrite the raw `QUERY_STRING`/`REQUEST_URI`
+values, so the few rules inspecting those (`920260`, `920540`, `920460` inspect
+`REQUEST_URI`; `931110` inspects `QUERY_STRING`) still see the full string. If one
+of them false-positives, use `disable($ruleId)`, a manipulator, or a bare-variable
+exclusion naming the variable that rule actually inspects -
+`excludeTargetById(920260, 'REQUEST_URI')` or `excludeTargetById(931110,
+'QUERY_STRING')`. A selector naming a variable the rule does not target is accepted
+but silently does nothing.
+
+### Manipulators (advanced, weakens detection)
+
+A manipulator transforms collected values before rules match against them - the
+escape hatch for cases where excluding a whole parameter is too broad. Returning
+an empty string removes the value from inspection:
+
+```php
+use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\RequestValueManipulatorInterface;
+
+$coreRuleSet->addManipulator(
+    static fn (string $variable, ?string $name, string $value): string
+        => $name === 'fbclid' ? '' : $value,
+);
+$coreRuleSet->addManipulatorById(942431, $manipulator); // scoped to one rule
+```
+
+> **Warning:** whatever a manipulator removes or rewrites is invisible to every
+> rule it applies to - including real attack payloads hidden inside the removed
+> content. Prefer target exclusions; keep manipulators as narrow as possible.
+> Exceptions thrown by a manipulator propagate to the caller.
+
+Manipulators run after exclusions. Global manipulators are applied once per
+variable per request and shared across all rules; per-rule manipulators
+specialize from that shared result.
+
+### Logging
+
+Pass a PSR-3 logger to either preset (or to `CoreRuleSetMatcher`) to log every
+rule match at `info` level - **including matches on requests that stay below the
+threshold and pass**. Those sub-threshold entries are the tuning signal: watch
+them to find false-positive patterns (a `utm_content` value hitting `942431`,
+say) before scores ever accumulate to a block, then add a target exclusion.
+Blocked requests additionally log a `warning` with the total score, threshold
+and all matched rule ids.
+
+The log context carries `rule_id`, `severity`, `anomaly_score`, `paranoia_level`,
+`matched_variable` (e.g. `ARGS:utm_content`), `msg`, `method`, `path` and
+`log_data` - the rule's CRS `logdata:` template expanded with the matched data
+(`%{TX.0}`, `%{MATCHED_VAR_NAME}`, `%{MATCHED_VAR}`), sanitized (control
+characters stripped) and length-bounded before it reaches the log line.
 
 ### Using the SecRule engine directly
 
@@ -87,12 +216,14 @@ The engine implements a pragmatic subset of ModSecurity; see the table below.
 
 Like upstream CRS, paranoia levels are cumulative: `ParanoiaLevel::Level2` activates
 all level 1 and level 2 rules. Level 1 is designed to be safe for most applications;
-higher levels detect more but produce more false positives. Since Phirewall blocks on
-the first match (there is no anomaly scoring, see below) and both presets block every
-match, be conservative: start with level 1 and raise it only after checking the higher
-levels against your real traffic. The fail2ban preset does not soften this - it blocks
-the same matches and merely adds a key ban on top - so a higher level is not a safer
-choice there.
+higher levels detect more but produce more false positives. In this snapshot almost
+every rule at every level is CRITICAL and blocks on its own at the default threshold;
+only the handful of WARNING rules merely accumulate score. Raising the paranoia level
+therefore mostly adds more CRITICAL rules, so expect more blocking (and more false
+positives), not just more accumulated score. Start with level 1, watch the
+[match log](#logging) with a higher level against your real traffic, add
+[exclusions](#excluding-parameters-from-rules-false-positives) for the false
+positives you find, then raise the level.
 
 ### Skipping the per-request parse
 
@@ -131,23 +262,27 @@ process therefore ships only the CRS rules that the engine can evaluate faithful
 | Filter | Effect |
 | --- | --- |
 | Request phase only | `RESPONSE-*.conf` files and exclusion templates are skipped |
-| Blocking rules only | Rules without a `deny`/`block` action (initialization, scoring) are dropped |
+| Blocking rules only | Rules without a `deny`/`block` action (initialization, control flow) are dropped; kept rules contribute their `severity` score to the anomaly total |
 | No chains | Chained rules are dropped entirely; keeping only a chain's first condition would over-block |
 | Supported operators | `@rx`, `@contains`, `@streq`, `@beginsWith`, `@endsWith`, `@pm`, `@pmFromFile`; everything else (`@detectSQLi`, `@validateByteRange`, ...) is dropped |
-| Supported variables | `REQUEST_URI`, `REQUEST_METHOD`, `QUERY_STRING`, `ARGS`, `ARGS_NAMES`, `REQUEST_COOKIES`, `REQUEST_COOKIES_NAMES`, `REQUEST_HEADERS`, `REQUEST_HEADERS_NAMES`, `REQUEST_FILENAME`; rules whose variables are all unsupported (for example selector variables such as `REQUEST_HEADERS:User-Agent`) are dropped |
+| Supported targets | `REQUEST_URI`, `REQUEST_METHOD`, `QUERY_STRING`, `ARGS`, `ARGS_NAMES`, `REQUEST_COOKIES`, `REQUEST_COOKIES_NAMES`, `REQUEST_HEADERS`, `REQUEST_HEADERS_NAMES`, `REQUEST_FILENAME` - bare or with a named selector (`REQUEST_HEADERS:User-Agent`, `!ARGS_NAMES:/^utm_/`); rules whose positive targets are all unsupported (`XML:/*`, `REQUEST_BODY`, ...) are dropped |
 
 Further engine differences to be aware of:
 
-- **No anomaly scoring.** Upstream CRS collects per-rule scores and blocks at a
-  threshold; Phirewall blocks on the first matching rule.
 - **No transformations.** `t:lowercase`, `t:urlDecodeUni` and friends are ignored;
-  rules are evaluated against the raw collected values.
-- **Partial variable evaluation.** A kept rule that also lists unsupported variables
-  (for example a `!REQUEST_COOKIES:/__utm/` exclusion) evaluates against its
-  supported variables only.
+  rules are evaluated against the raw collected values. As one deliberate exception,
+  the string operators (`@streq`, `@contains`, `@beginsWith`, `@endsWith`) fold case,
+  reproducing the common CRS pattern of a `t:lowercase` transformation plus a
+  lowercase literal; a rule that genuinely wanted case-sensitive matching without
+  `t:lowercase` is matched case-insensitively instead (a safe over-match, never an
+  under-match).
+- **Partial target evaluation.** A kept rule that also lists unsupported selectors
+  (for example `XML:/*`) evaluates against its supported targets only. Named and
+  negated selectors of supported variables ARE honored: `REQUEST_HEADERS:User-Agent`
+  inspects only that header, `!REQUEST_COOKIES:/__utm/` excludes matching cookies.
 
-`resources/rules/manifest.json` records the imported release, per-level rule counts
-and how many rules were dropped per reason.
+`resources/rules/manifest.json` records the imported release, per-level and
+per-severity rule counts and how many rules were dropped per reason.
 
 This package hardens a PHP application but is **not** a replacement for a full WAF
 deployment of the CRS.
