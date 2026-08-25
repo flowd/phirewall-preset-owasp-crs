@@ -8,7 +8,7 @@ namespace Flowd\PhirewallPresetOwaspCrs\Engine\Operator;
  * Evaluates values against phrases loaded from a file (@pmFromFile operator).
  * Supports path traversal prevention and per-path caching.
  */
-final readonly class PhraseMatchFromFileEvaluator implements OperatorEvaluatorInterface
+final readonly class PhraseMatchFromFileEvaluator implements DetailedOperatorEvaluatorInterface
 {
     public function __construct(
         private string $filePath,
@@ -19,7 +19,13 @@ final readonly class PhraseMatchFromFileEvaluator implements OperatorEvaluatorIn
     /** @param list<string> $values */
     public function evaluate(array $values): bool
     {
-        return PhraseMatchEvaluator::matchAny($values, $this->loadPhrases());
+        return $this->outcome($values) !== OperatorResult::noMatch();
+    }
+
+    /** @param list<string> $values */
+    public function outcome(array $values): OperatorResult
+    {
+        return PhraseMatchEvaluator::firstMatch($values, $this->loadPhrases());
     }
 
     /**

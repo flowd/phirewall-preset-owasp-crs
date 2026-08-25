@@ -7,7 +7,7 @@ namespace Flowd\PhirewallPresetOwaspCrs\Engine\Operator;
 /**
  * Evaluates values against a list of phrases using case-insensitive substring matching (@pm operator).
  */
-final readonly class PhraseMatchEvaluator implements OperatorEvaluatorInterface
+final readonly class PhraseMatchEvaluator implements DetailedOperatorEvaluatorInterface
 {
     /** @var list<string> Cached parsed phrase list. */
     private array $phrases;
@@ -20,7 +20,13 @@ final readonly class PhraseMatchEvaluator implements OperatorEvaluatorInterface
     /** @param list<string> $values */
     public function evaluate(array $values): bool
     {
-        return self::matchAny($values, $this->phrases);
+        return $this->outcome($values) !== OperatorResult::noMatch();
+    }
+
+    /** @param list<string> $values */
+    public function outcome(array $values): OperatorResult
+    {
+        return self::firstMatch($values, $this->phrases);
     }
 
     /**
@@ -33,18 +39,30 @@ final readonly class PhraseMatchEvaluator implements OperatorEvaluatorInterface
      */
     public static function matchAny(array $values, array $phrases): bool
     {
+        return self::firstMatch($values, $phrases) !== OperatorResult::noMatch();
+    }
+
+    /**
+     * Locate the first value containing any phrase (case-insensitive); the
+     * matched phrase is exposed as the TX.0 capture.
+     *
+     * @param list<string> $values
+     * @param list<string> $phrases
+     */
+    public static function firstMatch(array $values, array $phrases): OperatorResult
+    {
         if ($phrases === []) {
-            return false;
+            return OperatorResult::noMatch();
         }
 
-        foreach ($values as $value) {
+        foreach ($values as $index => $value) {
             foreach ($phrases as $phrase) {
                 if ($phrase !== '' && stripos($value, $phrase) !== false) {
-                    return true;
+                    return OperatorResult::matched($index, [$phrase]);
                 }
             }
         }
 
-        return false;
+        return OperatorResult::noMatch();
     }
 }

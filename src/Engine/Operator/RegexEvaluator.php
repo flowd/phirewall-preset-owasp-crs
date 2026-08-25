@@ -18,10 +18,11 @@ namespace Flowd\PhirewallPresetOwaspCrs\Engine\Operator;
  * Values exceeding {@see self::MAX_SUBJECT_LENGTH} bytes are truncated to that length
  * and the head is inspected, bounding regex work on attacker-controlled input without letting a
  * payload evade detection simply by padding past the limit. A subject that triggers a PCRE engine
- * error (malformed UTF-8 under the /u flag, backtrack/recursion limit) is treated as a match so a
- * crafted value cannot disable a rule by forcing the error.
+ * error (malformed UTF-8 under the /u flag, backtrack/recursion limit) fails closed so a crafted
+ * value cannot disable a rule by forcing the error; {@see outcome()} reports it as
+ * {@see RuleOutcome::FailClosed} so callers can distinguish it from a real match.
  */
-final readonly class RegexEvaluator implements OperatorEvaluatorInterface
+final readonly class RegexEvaluator implements DetailedOperatorEvaluatorInterface
 {
     /** Maximum subject length (bytes) evaluated against the pattern; longer values are skipped (ReDoS guard). */
     public const MAX_SUBJECT_LENGTH = 8192;
@@ -41,14 +42,20 @@ final readonly class RegexEvaluator implements OperatorEvaluatorInterface
     /** @param list<string> $values */
     public function evaluate(array $values): bool
     {
+        return $this->outcome($values) !== OperatorResult::noMatch();
+    }
+
+    /** @param list<string> $values */
+    public function outcome(array $values): OperatorResult
+    {
         // A pattern that does not compile is treated as no-match for that rule (validity is
         // checked once in the constructor). Treating it as a match instead would let one broken
         // rule block every request.
         if (!$this->patternCompiles) {
-            return false;
+            return OperatorResult::noMatch();
         }
 
-        foreach ($values as $value) {
+        foreach ($values as $index => $value) {
             if (strlen($value) > self::MAX_SUBJECT_LENGTH) {
                 // Byte truncation can split a trailing multi-byte UTF-8 sequence, which would make
                 // an otherwise-valid subject fail the /u match and be wrongly treated as a match.
@@ -57,14 +64,38 @@ final readonly class RegexEvaluator implements OperatorEvaluatorInterface
                 $value = $this->trimPartialTrailingUtf8(substr($value, 0, self::MAX_SUBJECT_LENGTH));
             }
 
-            // Pattern compiles, so anything other than a definite no-match (0) is either a real
-            // match or a subject-induced engine error; both fail closed to a match.
-            if (@preg_match($this->delimitedPattern, $value) !== 0) {
-                return true;
+            $matchResult = @preg_match($this->delimitedPattern, $value, $matches);
+            if ($matchResult === 1) {
+                return OperatorResult::matched($index, $this->positionalCaptures($matches));
+            }
+
+            // Pattern compiles, so anything other than match (1) or definite no-match (0) is a
+            // subject-induced engine error; fail closed rather than skipping the value.
+            if ($matchResult !== 0) {
+                return OperatorResult::failClosed($index);
             }
         }
 
-        return false;
+        return OperatorResult::noMatch();
+    }
+
+    /**
+     * The positional capture groups of a match, in order: index 0 is the full
+     * match (TX.0), the following entries the numbered groups.
+     *
+     * @param array<int|string, string> $matches
+     * @return list<string>
+     */
+    private function positionalCaptures(array $matches): array
+    {
+        $captures = [];
+        foreach ($matches as $key => $capturedValue) {
+            if (is_int($key)) {
+                $captures[] = $capturedValue;
+            }
+        }
+
+        return $captures;
     }
 
     /**

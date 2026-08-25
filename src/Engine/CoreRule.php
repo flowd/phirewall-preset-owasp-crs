@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Flowd\PhirewallPresetOwaspCrs\Engine;
 
+use Flowd\PhirewallPresetOwaspCrs\Engine\Operator\DetailedOperatorEvaluatorInterface;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Operator\OperatorEvaluatorFactory;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Operator\OperatorEvaluatorInterface;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\RequestVariableValues;
+use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\TargetSelector;
 use Psr\Http\Message\ServerRequestInterface;
 
 /**
@@ -15,11 +17,29 @@ use Psr\Http\Message\ServerRequestInterface;
  *
  * Variable collection is delegated to VariableCollectorInterface implementations.
  * Operator evaluation is delegated to OperatorEvaluatorInterface implementations.
+ * Named selectors (`REQUEST_HEADERS:User-Agent`) restrict collection to that
+ * member; negated selectors (`!REQUEST_HEADERS:Cookie`) exclude members from
+ * the rule's bare selector of the same variable. Selectors of unsupported
+ * variables (e.g. `XML:/*`) collect nothing (partial evaluation).
  */
 final readonly class CoreRule
 {
     /** Resolved operator evaluator for this rule. */
     private OperatorEvaluatorInterface $operatorEvaluator;
+
+    /**
+     * Positive targets this rule inspects, parsed from {@see $variables}.
+     *
+     * @var list<TargetSelector>
+     */
+    private array $targets;
+
+    /**
+     * Negated selectors from the rule text, grouped by collection variable.
+     *
+     * @var array<string, list<TargetSelector>>
+     */
+    private array $textExclusions;
 
     /**
      * @param list<string> $variables
@@ -55,6 +75,25 @@ final readonly class CoreRule
             $this->operatorArgument,
             $this->contextFolder,
         );
+
+        $targets = [];
+        $textExclusions = [];
+        foreach ($variables as $variable) {
+            $selector = TargetSelector::tryParse($variable);
+            if (!$selector instanceof TargetSelector) {
+                continue; // unsupported selector: collects nothing (partial evaluation)
+            }
+
+            if ($selector->negated) {
+                $textExclusions[$selector->variable][] = $selector;
+                continue;
+            }
+
+            $targets[] = $selector;
+        }
+
+        $this->targets = $targets;
+        $this->textExclusions = $textExclusions;
     }
 
     /**
@@ -158,62 +197,106 @@ final readonly class CoreRule
     }
 
     /**
-     * Evaluate the rule against the request.
+     * Evaluate the rule against the request; the boolean view of {@see evaluate()}.
      *
      * When evaluating many rules for the same request, pass a shared {@see RequestVariableValues}
      * memo so each distinct variable is collected only once across all rules.
      */
     public function matches(ServerRequestInterface $serverRequest, ?RequestVariableValues $requestVariableValues = null): bool
     {
+        return $this->evaluate($serverRequest, $requestVariableValues)->outcome !== RuleOutcome::NoMatch;
+    }
+
+    /**
+     * Evaluate the rule against the request with match detail (matched target,
+     * matched value, operator captures) for scoring and logdata expansion.
+     */
+    public function evaluate(ServerRequestInterface $serverRequest, ?RequestVariableValues $requestVariableValues = null): CoreRuleResult
+    {
         // Only evaluate when rule is a blocking (deny) rule. Non-deny rules are ignored here.
         if (($this->actions['deny'] ?? false) !== true) {
-            return false;
+            return CoreRuleResult::noMatch();
         }
 
         $requestVariableValues ??= new RequestVariableValues($serverRequest);
 
-        $values = $this->collectVariableValues($requestVariableValues);
+        [$labels, $values] = $this->collectTargetValues($requestVariableValues);
 
         // Fail closed: if a variable this rule inspects was truncated at the per-variable
         // cap, the dropped portion is un-inspectable, so treat the oversized request as a
         // match rather than letting a payload padded past the cap slip through unevaluated.
-        foreach ($this->variables as $variable) {
-            if ($requestVariableValues->wasCapped($variable)) {
-                return true;
+        foreach ($this->targets as $target) {
+            if ($requestVariableValues->wasCapped($target->variable)) {
+                return CoreRuleResult::failClosed($target->variable);
             }
         }
 
         if ($values === []) {
-            return false;
+            return CoreRuleResult::noMatch();
         }
 
-        return $this->operatorEvaluator->evaluate($values);
+        if ($this->operatorEvaluator instanceof DetailedOperatorEvaluatorInterface) {
+            $operatorResult = $this->operatorEvaluator->outcome($values);
+            $matchedLabel = $operatorResult->matchedValueIndex !== null
+                ? ($labels[$operatorResult->matchedValueIndex] ?? null)
+                : null;
+
+            return match ($operatorResult->outcome) {
+                RuleOutcome::NoMatch => CoreRuleResult::noMatch(),
+                RuleOutcome::Matched => CoreRuleResult::matched(
+                    $matchedLabel,
+                    $operatorResult->matchedValueIndex !== null ? ($values[$operatorResult->matchedValueIndex] ?? null) : null,
+                    $operatorResult->captures,
+                ),
+                RuleOutcome::FailClosed => CoreRuleResult::failClosed($matchedLabel),
+            };
+        }
+
+        return $this->operatorEvaluator->evaluate($values)
+            ? CoreRuleResult::matched(null, null)
+            : CoreRuleResult::noMatch();
     }
 
     /**
-     * Assemble this rule's target values from the shared per-request memo.
+     * Assemble this rule's target values from the shared per-request memo, applying
+     * the rule's own named selectors and negated (`!`) exclusions. Returns the
+     * matched-target labels (`ARGS:utm_content`, `QUERY_STRING`) parallel to the values.
      *
-     * Empty values are dropped. Each targeted variable's values are independently
-     * capped by {@see RequestVariableValues::valuesFor()}; there is deliberately NO
+     * Empty values are dropped. Each targeted variable's entries are independently
+     * capped by {@see RequestVariableValues::entriesFor()}; there is deliberately NO
      * aggregate cap across variables here, so a high-volume earlier variable cannot
      * short-circuit evaluation of a later one. A variable truncated at its cap is
      * surfaced via {@see RequestVariableValues::wasCapped()} and handled (fail-closed)
-     * in {@see matches()}, not here.
+     * in {@see evaluate()}, not here.
      *
-     * @return list<string>
+     * @return array{0: list<?string>, 1: list<string>}
      */
-    private function collectVariableValues(RequestVariableValues $requestVariableValues): array
+    private function collectTargetValues(RequestVariableValues $requestVariableValues): array
     {
-        /** @var list<string> $collected */
-        $collected = [];
-        foreach ($this->variables as $variable) {
-            foreach ($requestVariableValues->valuesFor($variable) as $value) {
-                if ($value !== '') {
-                    $collected[] = $value;
+        /** @var list<?string> $labels */
+        $labels = [];
+        /** @var list<string> $values */
+        $values = [];
+        foreach ($this->targets as $target) {
+            $exclusions = $this->textExclusions[$target->variable] ?? [];
+            foreach ($requestVariableValues->entriesFor($target->variable) as $entry) {
+                if ($entry['value'] === '') {
+                    continue;
                 }
+                if (!$target->matchesName($entry['name'])) {
+                    continue;
+                }
+                foreach ($exclusions as $exclusion) {
+                    if ($exclusion->matchesName($entry['name'])) {
+                        continue 2;
+                    }
+                }
+
+                $labels[] = $target->variable . ($entry['name'] !== null ? ':' . $entry['name'] : '');
+                $values[] = $entry['value'];
             }
         }
 
-        return $collected;
+        return [$labels, $values];
     }
 }
