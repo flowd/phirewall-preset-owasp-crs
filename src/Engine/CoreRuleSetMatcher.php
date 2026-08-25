@@ -8,25 +8,38 @@ use Flowd\Phirewall\Config\MatchResult;
 use Flowd\Phirewall\Config\RequestMatcherInterface;
 use Flowd\Phirewall\Matchers\CompiledDataCacheAware;
 use Flowd\Phirewall\Support\CompiledDataCache;
+use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\RequestValueManipulatorInterface;
+use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\TargetSelector;
 use Flowd\PhirewallPresetOwaspCrs\ParanoiaLevel;
 use Flowd\PhirewallPresetOwaspCrs\RuleSetLoader;
 use Psr\Http\Message\ServerRequestInterface;
+use Psr\Log\LoggerInterface;
 
 /**
- * Adapter that evaluates an OWASP CoreRuleSet against a PSR-7 request.
- * Implements RequestMatcherInterface so it can be used as a Blocklist matcher
- * or as a fail2ban filter.
+ * Adapter that evaluates an OWASP CoreRuleSet against a PSR-7 request with
+ * anomaly scoring. Implements RequestMatcherInterface so it can be used as a
+ * Blocklist matcher or as a fail2ban filter; the request matches once its
+ * accumulated anomaly score reaches the configured threshold.
  *
  * Constructed via {@see fromRuleFiles()} the matcher parses the rule files
  * lazily on first use and, when the evaluating Config carries a
  * {@see CompiledDataCache}, loads the parsed rules from its compiled artifact
- * instead of re-parsing on every request. enable()/disable() calls made
- * before the first use are queued and applied once the rules are loaded.
- * Constructed with an already parsed {@see CoreRuleSet} the matcher behaves
- * eagerly and the compiled-data cache is not consulted.
+ * instead of re-parsing on every request. Configuration calls (enable/disable,
+ * exclusions, manipulators) made before the first use are queued and applied
+ * once the rules are loaded; exclusions and manipulators are runtime tuning
+ * and never enter the compiled artifact. Constructed with an already parsed
+ * {@see CoreRuleSet} the matcher behaves eagerly and the compiled-data cache
+ * is not consulted.
+ *
+ * With a PSR-3 logger every rule match is logged at info level - including
+ * matches on requests that stay below the threshold and pass. Those
+ * sub-threshold entries are the tuning signal: they surface false-positive
+ * patterns (e.g. marketing parameters) before scores ever accumulate to a block.
  */
 final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataCacheAware
 {
+    public const DEFAULT_ANOMALY_THRESHOLD = CoreRuleSet::DEFAULT_ANOMALY_THRESHOLD;
+
     /**
      * Format version of the compiled rule data. Bump whenever
      * {@see CoreRule::toArray()} / {@see CoreRule::fromArray()} change the
@@ -34,6 +47,9 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
      * hydrating an incompatible one.
      */
     private const COMPILED_SCHEMA_VERSION = 2;
+
+    /** Diagnostic-header bound: more matched rule ids are summarized as ',+N'. */
+    private const MAX_RULE_IDS_IN_HEADER = 10;
 
     private ?CompiledDataCache $compiledDataCache = null;
 
@@ -43,11 +59,22 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
 
     private ?int $maxValuesPerCrsVariable = null;
 
-    /** @var list<array{0: bool, 1: int}> Queued enable(true)/disable(false) calls by rule id. */
-    private array $pendingRuleToggles = [];
+    /** @var list<\Closure(CoreRuleSet): void> Configuration queued until the rule set is loaded. */
+    private array $pendingConfiguration = [];
 
-    public function __construct(private ?CoreRuleSet $coreRuleSet = null)
-    {
+    /**
+     * @throws \InvalidArgumentException When $anomalyThreshold is not positive.
+     */
+    public function __construct(
+        private ?CoreRuleSet $coreRuleSet = null,
+        private readonly int $anomalyThreshold = self::DEFAULT_ANOMALY_THRESHOLD,
+        private readonly ?LoggerInterface $logger = null,
+    ) {
+        if ($anomalyThreshold < 1) {
+            throw new \InvalidArgumentException(
+                sprintf('$anomalyThreshold must be a positive integer, %d given.', $anomalyThreshold),
+            );
+        }
     }
 
     /**
@@ -59,8 +86,10 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
         ParanoiaLevel $paranoiaLevel = ParanoiaLevel::Level1,
         ?string $rulesDirectory = null,
         ?int $maxValuesPerCrsVariable = null,
+        int $anomalyThreshold = self::DEFAULT_ANOMALY_THRESHOLD,
+        ?LoggerInterface $logger = null,
     ): self {
-        $matcher = new self();
+        $matcher = new self(null, $anomalyThreshold, $logger);
         $matcher->paranoiaLevel = $paranoiaLevel;
         $matcher->rulesDirectory = $rulesDirectory;
         $matcher->maxValuesPerCrsVariable = $maxValuesPerCrsVariable;
@@ -76,48 +105,58 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
     public function match(ServerRequestInterface $serverRequest): MatchResult
     {
         $coreRuleSet = $this->coreRuleSet();
-        $evaluation = $coreRuleSet->evaluate($serverRequest);
-        if (!$evaluation->isBlocked()) {
-            return MatchResult::noMatch();
-        }
+        $evaluation = $coreRuleSet->evaluate($serverRequest, $this->anomalyThreshold);
+        $this->logEvaluation($serverRequest, $evaluation);
 
         $firstMatch = $evaluation->firstMatch();
-        if (!$firstMatch instanceof RuleMatch) {
+        if (!$evaluation->isBlocked() || !$firstMatch instanceof RuleMatch) {
             return MatchResult::noMatch();
         }
 
-        // diagnostic_headers drives the X-Phirewall-Owasp-Rule response header
-        // via Config::enableDiagnosticsHeaders(); owasp_rule_id and msg are
+        // diagnostic_headers drives the X-Phirewall-Owasp-* response headers
+        // via Config::enableDiagnosticsHeaders(); the owasp_* keys are
         // structured metadata for event listeners reading the MatchResult.
         $meta = [
+            'owasp_anomaly_score' => $evaluation->totalScore,
+            'owasp_anomaly_threshold' => $evaluation->anomalyThreshold,
+            'owasp_rule_ids' => implode(',', $evaluation->matchedRuleIds()),
             'owasp_rule_id' => $firstMatch->ruleId,
-            'diagnostic_headers' => ['X-Phirewall-Owasp-Rule' => (string) $firstMatch->ruleId],
+            'diagnostic_headers' => [
+                'X-Phirewall-Owasp-Rule' => $this->headerRuleIds($evaluation),
+                'X-Phirewall-Owasp-Score' => $evaluation->totalScore . '/' . $evaluation->anomalyThreshold,
+            ],
         ];
         if ($firstMatch->message !== null) {
             $meta['msg'] = $firstMatch->message;
         }
 
+        if ($firstMatch->logData !== null) {
+            $meta['owasp_log_data'] = $firstMatch->logData;
+        }
+
+        if ($evaluation->failClosed) {
+            $meta['owasp_fail_closed'] = true;
+        }
+
         return MatchResult::matched('owasp', $meta);
     }
 
-    public function enable(int $id): void
+    public function enable(int $id): self
     {
-        if ($this->coreRuleSet instanceof CoreRuleSet) {
-            $this->coreRuleSet->enable($id);
-            return;
-        }
+        $this->configure(static function (CoreRuleSet $coreRuleSet) use ($id): void {
+            $coreRuleSet->enable($id);
+        });
 
-        $this->pendingRuleToggles[] = [true, $id];
+        return $this;
     }
 
-    public function disable(int $id): void
+    public function disable(int $id): self
     {
-        if ($this->coreRuleSet instanceof CoreRuleSet) {
-            $this->coreRuleSet->disable($id);
-            return;
-        }
+        $this->configure(static function (CoreRuleSet $coreRuleSet) use ($id): void {
+            $coreRuleSet->disable($id);
+        });
 
-        $this->pendingRuleToggles[] = [false, $id];
+        return $this;
     }
 
     public function isEnabled(int $id): bool
@@ -126,7 +165,148 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
     }
 
     /**
-     * Resolve the rule set, loading and applying queued toggles on first use.
+     * Exclude a target from inspection by every rule; see {@see CoreRuleSet::excludeTarget()}.
+     *
+     * @throws \InvalidArgumentException When the selector form is unsupported.
+     */
+    public function excludeTarget(string $selector): self
+    {
+        TargetSelector::parse($selector); // validate eagerly, even when queued
+        $this->configure(static function (CoreRuleSet $coreRuleSet) use ($selector): void {
+            $coreRuleSet->excludeTarget($selector);
+        });
+
+        return $this;
+    }
+
+    /**
+     * Exclude a target from inspection by one rule; see {@see CoreRuleSet::excludeTargetById()}.
+     *
+     * @throws \InvalidArgumentException When the selector form is unsupported.
+     */
+    public function excludeTargetById(int $ruleId, string $selector): self
+    {
+        TargetSelector::parse($selector);
+        $this->configure(static function (CoreRuleSet $coreRuleSet) use ($ruleId, $selector): void {
+            $coreRuleSet->excludeTargetById($ruleId, $selector);
+        });
+
+        return $this;
+    }
+
+    /**
+     * Exclude a target from rules carrying a tag; see {@see CoreRuleSet::excludeTargetByTag()}.
+     *
+     * @throws \InvalidArgumentException When the selector form is unsupported.
+     */
+    public function excludeTargetByTag(string $tag, string $selector): self
+    {
+        TargetSelector::parse($selector);
+        $this->configure(static function (CoreRuleSet $coreRuleSet) use ($tag, $selector): void {
+            $coreRuleSet->excludeTargetByTag($tag, $selector);
+        });
+
+        return $this;
+    }
+
+    /**
+     * Register a global manipulator; see {@see CoreRuleSet::addManipulator()}.
+     *
+     * @param RequestValueManipulatorInterface|\Closure(string, ?string, string): string $manipulator
+     */
+    public function addManipulator(RequestValueManipulatorInterface|\Closure $manipulator): self
+    {
+        $this->configure(static function (CoreRuleSet $coreRuleSet) use ($manipulator): void {
+            $coreRuleSet->addManipulator($manipulator);
+        });
+
+        return $this;
+    }
+
+    /**
+     * Register a per-rule manipulator; see {@see CoreRuleSet::addManipulatorById()}.
+     *
+     * @param RequestValueManipulatorInterface|\Closure(string, ?string, string): string $manipulator
+     */
+    public function addManipulatorById(int $ruleId, RequestValueManipulatorInterface|\Closure $manipulator): self
+    {
+        $this->configure(static function (CoreRuleSet $coreRuleSet) use ($ruleId, $manipulator): void {
+            $coreRuleSet->addManipulatorById($ruleId, $manipulator);
+        });
+
+        return $this;
+    }
+
+    /**
+     * Apply a configuration step now, or queue it until the rule set is loaded.
+     *
+     * @param \Closure(CoreRuleSet): void $configuration
+     */
+    private function configure(\Closure $configuration): void
+    {
+        if ($this->coreRuleSet instanceof CoreRuleSet) {
+            $configuration($this->coreRuleSet);
+            return;
+        }
+
+        $this->pendingConfiguration[] = $configuration;
+    }
+
+    private function headerRuleIds(RuleSetEvaluation $ruleSetEvaluation): string
+    {
+        $ruleIds = $ruleSetEvaluation->matchedRuleIds();
+        if (count($ruleIds) <= self::MAX_RULE_IDS_IN_HEADER) {
+            return implode(',', $ruleIds);
+        }
+
+        $overflow = count($ruleIds) - self::MAX_RULE_IDS_IN_HEADER;
+
+        return implode(',', array_slice($ruleIds, 0, self::MAX_RULE_IDS_IN_HEADER)) . ',+' . $overflow;
+    }
+
+    /**
+     * Log every rule match at info level - including sub-threshold matches on
+     * requests that pass (the tuning signal) - and the block decision at
+     * warning level. Log data is expanded and sanitized by the rule set.
+     */
+    private function logEvaluation(ServerRequestInterface $serverRequest, RuleSetEvaluation $ruleSetEvaluation): void
+    {
+        if (!$this->logger instanceof LoggerInterface || $ruleSetEvaluation->ruleMatches === []) {
+            return;
+        }
+
+        $method = $serverRequest->getMethod();
+        $path = $serverRequest->getUri()->getPath();
+
+        foreach ($ruleSetEvaluation->ruleMatches as $ruleMatch) {
+            $this->logger->info('OWASP CRS rule {rule_id} matched', [
+                'rule_id' => $ruleMatch->ruleId,
+                'severity' => $ruleMatch->severity,
+                'anomaly_score' => $ruleMatch->anomalyScore,
+                'paranoia_level' => $ruleMatch->paranoiaLevel,
+                'matched_variable' => $ruleMatch->matchedVariableName,
+                'log_data' => $ruleMatch->logData,
+                'msg' => $ruleMatch->message,
+                'fail_closed' => $ruleMatch->failClosed,
+                'method' => $method,
+                'path' => $path,
+            ]);
+        }
+
+        if ($ruleSetEvaluation->isBlocked()) {
+            $this->logger->warning('OWASP CRS anomaly threshold reached', [
+                'total_score' => $ruleSetEvaluation->totalScore,
+                'anomaly_threshold' => $ruleSetEvaluation->anomalyThreshold,
+                'rule_ids' => $ruleSetEvaluation->matchedRuleIds(),
+                'fail_closed' => $ruleSetEvaluation->failClosed,
+                'method' => $method,
+                'path' => $path,
+            ]);
+        }
+    }
+
+    /**
+     * Resolve the rule set, loading it and applying queued configuration on first use.
      */
     private function coreRuleSet(): CoreRuleSet
     {
@@ -135,11 +315,11 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
         }
 
         $coreRuleSet = $this->loadRuleSet();
-        foreach ($this->pendingRuleToggles as [$enable, $id]) {
-            $enable ? $coreRuleSet->enable($id) : $coreRuleSet->disable($id);
+        foreach ($this->pendingConfiguration as $configuration) {
+            $configuration($coreRuleSet);
         }
 
-        $this->pendingRuleToggles = [];
+        $this->pendingConfiguration = [];
 
         return $this->coreRuleSet = $coreRuleSet;
     }

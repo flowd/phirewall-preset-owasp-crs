@@ -56,7 +56,34 @@ final class CoreRuleSetMatcherLazyTest extends TestCase
         $this->assertTrue($matchResult->isMatch());
         $meta = $matchResult->metadata();
         $this->assertSame(400001, $meta['owasp_rule_id'] ?? null);
-        $this->assertSame(['X-Phirewall-Owasp-Rule' => '400001'], $meta['diagnostic_headers'] ?? null);
+        $this->assertSame([
+            'X-Phirewall-Owasp-Rule' => '400001',
+            'X-Phirewall-Owasp-Score' => '5/5',
+        ], $meta['diagnostic_headers'] ?? null);
+    }
+
+    public function testAnomalyThresholdAndTuningAreAppliedOnTheLazyPath(): void
+    {
+        [$root] = $this->rulesDirectory();
+
+        // Threshold 6 keeps the single CRITICAL rule (score 5) below the block line.
+        $tolerant = CoreRuleSetMatcher::fromRuleFiles(ParanoiaLevel::Level1, $root->url() . '/rules', null, 6);
+        $this->assertFalse($tolerant->match(new ServerRequest('GET', '/admin'))->isMatch());
+
+        // Queued exclusion before first use silences the rule's only target.
+        $tuned = CoreRuleSetMatcher::fromRuleFiles(ParanoiaLevel::Level1, $root->url() . '/rules');
+        $tuned->excludeTargetById(400001, 'REQUEST_URI');
+        $this->assertFalse($tuned->match(new ServerRequest('GET', '/admin'))->isMatch());
+    }
+
+    public function testQueuedInvalidSelectorFailsEagerly(): void
+    {
+        [$root] = $this->rulesDirectory();
+        $matcher = CoreRuleSetMatcher::fromRuleFiles(ParanoiaLevel::Level1, $root->url() . '/rules');
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        $matcher->excludeTarget('QUERY_STRING:utm_source');
     }
 
     public function testTogglesBeforeFirstUseAreQueuedAndApplied(): void

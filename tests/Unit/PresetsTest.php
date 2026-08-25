@@ -29,6 +29,15 @@ final class PresetsTest extends TestCase
         ]);
     }
 
+    private function setUpWarningRulesDirectory(): vfsStreamDirectory
+    {
+        return vfsStream::setup('rules', null, [
+            'REQUEST-942-ANOMALY.pl1.conf' => 'SecRule ARGS "@contains first-pattern" "id:942430,phase:2,block,severity:\'WARNING\'"' . "\n"
+                . 'SecRule ARGS "@contains second-pattern" "id:942431,phase:2,block,severity:\'WARNING\'"' . "\n",
+            'manifest.json' => '{"crsVersion":"v4.0.0","importedAt":"2026-06-12T00:00:00+00:00"}',
+        ]);
+    }
+
     public function testBlocklistOverlayBlocksMatchingRequestsAfterMerge(): void
     {
         $root = $this->setUpRulesDirectory();
@@ -52,6 +61,50 @@ final class PresetsTest extends TestCase
 
         $levelTwoFirewall = new Firewall($baseConfig->with(Presets::blocklist(ParanoiaLevel::Level2, $root->url())));
         $this->assertTrue($levelTwoFirewall->decide($xssRequest)->isBlocked());
+    }
+
+    public function testBlocklistAccumulatesAnomalyScoresAcrossRules(): void
+    {
+        $root = $this->setUpWarningRulesDirectory();
+        $baseConfig = new Config(new InMemoryCache());
+        $firewall = new Firewall($baseConfig->with(Presets::blocklist(ParanoiaLevel::Level1, $root->url())));
+
+        $singleWarning = $this->requestWithQuery('first-pattern');
+        $this->assertFalse($firewall->decide($singleWarning)->isBlocked(), 'One WARNING (3) stays below the default threshold of 5');
+
+        $bothWarnings = (new ServerRequest('GET', 'https://example.test/'))
+            ->withQueryParams(['a' => 'first-pattern', 'b' => 'second-pattern']);
+        $this->assertTrue($firewall->decide($bothWarnings)->isBlocked(), '3 + 3 = 6 >= 5 blocks');
+    }
+
+    public function testBlocklistAnomalyThresholdIsConfigurable(): void
+    {
+        $root = $this->setUpWarningRulesDirectory();
+        $baseConfig = new Config(new InMemoryCache());
+        $firewall = new Firewall($baseConfig->with(
+            Presets::blocklist(ParanoiaLevel::Level1, $root->url(), anomalyThreshold: 3),
+        ));
+
+        $this->assertTrue($firewall->decide($this->requestWithQuery('first-pattern'))->isBlocked(), 'WARNING (3) >= 3 blocks');
+    }
+
+    public function testBlocklistConfigureClosureAppliesExclusionsBeforeFirstUse(): void
+    {
+        $root = $this->setUpRulesDirectory();
+        $baseConfig = new Config(new InMemoryCache());
+        $firewall = new Firewall($baseConfig->with(Presets::blocklist(
+            ParanoiaLevel::Level1,
+            $root->url(),
+            configure: static function (CoreRuleSetMatcher $coreRuleSetMatcher): void {
+                $coreRuleSetMatcher->excludeTarget('ARGS:/^utm_/');
+            },
+        )));
+
+        $utmRequest = (new ServerRequest('GET', 'https://example.test/'))
+            ->withQueryParams(['utm_content' => '1 union select password']);
+        $this->assertFalse($firewall->decide($utmRequest)->isBlocked(), 'The excluded utm parameter is not inspected');
+
+        $this->assertTrue($firewall->decide($this->requestWithQuery('1 union select password'))->isBlocked());
     }
 
     public function testBlocklistRegistersTheNamedPresetRule(): void
