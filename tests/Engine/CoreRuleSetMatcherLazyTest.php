@@ -107,7 +107,7 @@ final class CoreRuleSetMatcherLazyTest extends TestCase
         // Seed a parseable but malformed artifact (a rule entry without the
         // expected keys) under the identifier the matcher will look up.
         $ruleFiles = \Flowd\PhirewallPresetOwaspCrs\RuleSetLoader::ruleFiles(ParanoiaLevel::Level1, $rulesDir);
-        $identifier = 'owasp-crs-v1-pl' . ParanoiaLevel::Level1->value . '-' . substr(sha1(implode('|', $ruleFiles)), 0, 12);
+        $identifier = 'owasp-crs-v2-pl' . ParanoiaLevel::Level1->value . '-' . substr(sha1(implode('|', $ruleFiles)), 0, 12);
         $compiledDataCache->load($identifier, $ruleFiles, static fn(): array => [['not' => 'a valid rule']]);
         CompiledDataCache::clearProcessCache();
 
@@ -128,7 +128,7 @@ final class CoreRuleSetMatcherLazyTest extends TestCase
 
         // Seed a well-formed but EMPTY artifact under the matcher's identifier.
         $ruleFiles = \Flowd\PhirewallPresetOwaspCrs\RuleSetLoader::ruleFiles(ParanoiaLevel::Level1, $rulesDir);
-        $identifier = 'owasp-crs-v1-pl' . ParanoiaLevel::Level1->value . '-' . substr(sha1(implode('|', $ruleFiles)), 0, 12);
+        $identifier = 'owasp-crs-v2-pl' . ParanoiaLevel::Level1->value . '-' . substr(sha1(implode('|', $ruleFiles)), 0, 12);
         $compiledDataCache->load($identifier, $ruleFiles, static fn(): array => []);
         CompiledDataCache::clearProcessCache();
 
@@ -150,7 +150,7 @@ final class CoreRuleSetMatcherLazyTest extends TestCase
         // A rule with the right keys/top-level types but a non-string element in
         // "variables" - type-invalid, so fromArray() must reject it.
         $ruleFiles = \Flowd\PhirewallPresetOwaspCrs\RuleSetLoader::ruleFiles(ParanoiaLevel::Level1, $rulesDir);
-        $identifier = 'owasp-crs-v1-pl' . ParanoiaLevel::Level1->value . '-' . substr(sha1(implode('|', $ruleFiles)), 0, 12);
+        $identifier = 'owasp-crs-v2-pl' . ParanoiaLevel::Level1->value . '-' . substr(sha1(implode('|', $ruleFiles)), 0, 12);
         $compiledDataCache->load($identifier, $ruleFiles, static fn(): array => [[
             'id' => 400001,
             'variables' => [123],

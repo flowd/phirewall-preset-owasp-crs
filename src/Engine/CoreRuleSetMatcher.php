@@ -33,7 +33,7 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
      * artifact shape, so an upgrade rebuilds stale artifacts instead of
      * hydrating an incompatible one.
      */
-    private const COMPILED_SCHEMA_VERSION = 1;
+    private const COMPILED_SCHEMA_VERSION = 2;
 
     private ?CompiledDataCache $compiledDataCache = null;
 

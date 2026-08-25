@@ -24,6 +24,7 @@ final readonly class CoreRule
     /**
      * @param list<string> $variables
      * @param array<string, int|string|bool> $actions
+     * @param list<string> $tags
      */
     public function __construct(
         public int $id,
@@ -32,7 +33,23 @@ final readonly class CoreRule
         public string $operatorArgument, // e.g., pattern for @rx or needle for @contains
         public array $actions, // parsed action map (e.g., ['phase' => '2', 'deny' => true, 'msg' => '...'])
         public ?string $contextFolder = null, // folder path for context (e.g., for @pmFromFile)
+        public int $anomalyScore = 5, // rules without a recognizable severity score as CRITICAL (fail closed)
+        public ?string $severity = null, // normalized severity name, null when the source had none
+        public int $paranoiaLevel = 1,
+        public array $tags = [],
     ) {
+        if ($anomalyScore < 1) {
+            throw new \InvalidArgumentException(
+                sprintf('$anomalyScore must be a positive integer, %d given.', $anomalyScore),
+            );
+        }
+
+        if ($paranoiaLevel < 1 || $paranoiaLevel > 4) {
+            throw new \InvalidArgumentException(
+                sprintf('$paranoiaLevel must be between 1 and 4, %d given.', $paranoiaLevel),
+            );
+        }
+
         $this->operatorEvaluator = OperatorEvaluatorFactory::create(
             $this->operator,
             $this->operatorArgument,
@@ -43,7 +60,7 @@ final readonly class CoreRule
     /**
      * The rule as var_export-able plain data for {@see \Flowd\Phirewall\Support\CompiledDataCache}.
      *
-     * @return array{id: int, variables: list<string>, operator: string, operatorArgument: string, actions: array<string, int|string|bool>, contextFolder: ?string}
+     * @return array{id: int, variables: list<string>, operator: string, operatorArgument: string, actions: array<string, int|string|bool>, contextFolder: ?string, anomalyScore: int, severity: ?string, paranoiaLevel: int, tags: list<string>}
      */
     public function toArray(): array
     {
@@ -54,6 +71,10 @@ final readonly class CoreRule
             'operatorArgument' => $this->operatorArgument,
             'actions' => $this->actions,
             'contextFolder' => $this->contextFolder,
+            'anomalyScore' => $this->anomalyScore,
+            'severity' => $this->severity,
+            'paranoiaLevel' => $this->paranoiaLevel,
+            'tags' => $this->tags,
         ];
     }
 
@@ -73,6 +94,10 @@ final readonly class CoreRule
         $operatorArgument = $data['operatorArgument'] ?? null;
         $actions = $data['actions'] ?? null;
         $contextFolder = $data['contextFolder'] ?? null;
+        $anomalyScore = $data['anomalyScore'] ?? 5;
+        $severity = $data['severity'] ?? null;
+        $paranoiaLevel = $data['paranoiaLevel'] ?? 1;
+        $tags = $data['tags'] ?? [];
 
         if (!is_int($id)
             || !is_array($variables)
@@ -80,6 +105,10 @@ final readonly class CoreRule
             || !is_string($operatorArgument)
             || !is_array($actions)
             || ($contextFolder !== null && !is_string($contextFolder))
+            || !is_int($anomalyScore)
+            || ($severity !== null && !is_string($severity))
+            || !is_int($paranoiaLevel)
+            || !is_array($tags)
         ) {
             throw new \InvalidArgumentException('Compiled CRS rule data has an unexpected shape.');
         }
@@ -105,7 +134,27 @@ final readonly class CoreRule
             $validatedActions[$actionName] = $actionValue;
         }
 
-        return new self($id, $validatedVariables, $operator, $operatorArgument, $validatedActions, $contextFolder);
+        $validatedTags = [];
+        foreach ($tags as $tag) {
+            if (!is_string($tag)) {
+                throw new \InvalidArgumentException('Compiled CRS rule "tags" must be a list of strings.');
+            }
+
+            $validatedTags[] = $tag;
+        }
+
+        return new self(
+            $id,
+            $validatedVariables,
+            $operator,
+            $operatorArgument,
+            $validatedActions,
+            $contextFolder,
+            $anomalyScore,
+            $severity,
+            $paranoiaLevel,
+            $validatedTags,
+        );
     }
 
     /**
