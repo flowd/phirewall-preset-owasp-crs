@@ -24,16 +24,16 @@ final class CoreRuleSetOperatorSemanticsTest extends TestCase
         ]);
         $coreRuleSet = SecRuleLoader::fromString($rulesText);
 
-        $this->assertSame(800101, $coreRuleSet->match(new ServerRequest('GET', '/admin/panel')));
-        $this->assertSame(800102, $coreRuleSet->match(new ServerRequest('GET', '/api/v1/users')));
-        $this->assertSame(800103, $coreRuleSet->match(new ServerRequest('GET', '/index.php')));
-        $this->assertSame(800104, $coreRuleSet->match(new ServerRequest('GET', '/foo/SECRET/bar')));
+        $this->assertSame([800101], $coreRuleSet->evaluate(new ServerRequest('GET', '/admin/panel'))->matchedRuleIds());
+        $this->assertSame([800102], $coreRuleSet->evaluate(new ServerRequest('GET', '/api/v1/users'))->matchedRuleIds());
+        $this->assertSame([800103], $coreRuleSet->evaluate(new ServerRequest('GET', '/index.php'))->matchedRuleIds());
+        $this->assertSame([800104], $coreRuleSet->evaluate(new ServerRequest('GET', '/foo/SECRET/bar'))->matchedRuleIds());
 
         // Negative checks
-        $this->assertNull($coreRuleSet->match(new ServerRequest('GET', '/user/admin'))); // does not start with /admin
-        $this->assertNull($coreRuleSet->match(new ServerRequest('GET', '/apx/v1'))); // does not begin with /api
-        $this->assertNull($coreRuleSet->match(new ServerRequest('GET', '/index.php7'))); // does not end with .php
-        $this->assertNull($coreRuleSet->match(new ServerRequest('GET', '/foo/SECRT/bar'))); // no 'secret' substring present
+        $this->assertSame([], $coreRuleSet->evaluate(new ServerRequest('GET', '/user/admin'))->matchedRuleIds()); // does not start with /admin
+        $this->assertSame([], $coreRuleSet->evaluate(new ServerRequest('GET', '/apx/v1'))->matchedRuleIds()); // does not begin with /api
+        $this->assertSame([], $coreRuleSet->evaluate(new ServerRequest('GET', '/index.php7'))->matchedRuleIds()); // does not end with .php
+        $this->assertSame([], $coreRuleSet->evaluate(new ServerRequest('GET', '/foo/SECRT/bar'))->matchedRuleIds()); // no 'secret' substring present
     }
 
     public function testRequestMethodStreqAndContainsCaseInsensitive(): void
@@ -45,12 +45,12 @@ final class CoreRuleSetOperatorSemanticsTest extends TestCase
         $coreRuleSet = SecRuleLoader::fromString($rulesText);
 
         // First matching rule wins (streq), then after disabling it, contains should match
-        $this->assertSame(800201, $coreRuleSet->match(new ServerRequest('POST', '/anything')));
+        $this->assertSame([800201], $coreRuleSet->evaluate(new ServerRequest('POST', '/anything'))->matchedRuleIds());
         $coreRuleSet->disable(800201);
-        $this->assertSame(800202, $coreRuleSet->match(new ServerRequest('POST', '/anything')));
+        $this->assertSame([800202], $coreRuleSet->evaluate(new ServerRequest('POST', '/anything'))->matchedRuleIds());
 
         // negatives
-        $this->assertNull($coreRuleSet->match(new ServerRequest('GET', '/anything')));
+        $this->assertSame([], $coreRuleSet->evaluate(new ServerRequest('GET', '/anything'))->matchedRuleIds());
     }
 
     public function testRequestHeadersValuesAndNamesCaseInsensitive(): void
@@ -66,17 +66,17 @@ final class CoreRuleSetOperatorSemanticsTest extends TestCase
         $req = new ServerRequest('GET', '/anything');
         $req = $req->withHeader('X-Test', 'EVIL-PAYLOAD')->withHeader('Content-Type', 'text/plain');
 
-        $this->assertSame(800301, $coreRuleSet->match($req));
+        $this->assertSame([800301], $coreRuleSet->evaluate($req)->matchedRuleIds());
 
         // Disable first to test next rule in isolation
         $coreRuleSet->disable(800301);
-        $this->assertSame(800302, $coreRuleSet->match($req));
+        $this->assertSame([800302], $coreRuleSet->evaluate($req)->matchedRuleIds());
 
         // Negative: different header set should not match when rules enabled respectively
         $coreRuleSet->enable(800301);
         $coreRuleSet->disable(800302);
 
         $serverRequest = (new ServerRequest('GET', '/'))->withHeader('X-Test', 'benign');
-        $this->assertNull($coreRuleSet->match($serverRequest));
+        $this->assertSame([], $coreRuleSet->evaluate($serverRequest)->matchedRuleIds());
     }
 }

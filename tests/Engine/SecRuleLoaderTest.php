@@ -38,7 +38,7 @@ RULE;
         $coreRuleSet = SecRuleLoader::fromString($text);
         $req = new ServerRequest('GET', '/');
         $req = $req->withCookieParams(['a' => '<?php echo 1;']);
-        $this->assertSame(933100, $coreRuleSet->match($req));
+        $this->assertSame([933100], $coreRuleSet->evaluate($req)->matchedRuleIds());
     }
 
     public function testFromFileParsesMultilineSecRuleAndContainsId(): void
@@ -52,7 +52,7 @@ RULE;
         // And it should match request with PHP open tag in cookies
         $req = new ServerRequest('GET', '/');
         $req = $req->withCookieParams(['sess' => 'xx<?php yy']);
-        $this->assertSame(933100, $coreRuleSet->match($req));
+        $this->assertSame([933100], $coreRuleSet->evaluate($req)->matchedRuleIds());
     }
 
     public function testFromFileConfinesPmFromFileToRuleDirectory(): void
@@ -70,7 +70,7 @@ RULE;
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('Absolute path not permitted');
-        $coreRuleSet->match(new ServerRequest('GET', '/anything'));
+        $coreRuleSet->evaluate(new ServerRequest('GET', '/anything'));
     }
 
     public function testFromStringWithReportCountsParsedAndSkipped(): void
@@ -87,8 +87,8 @@ TXT;
         $this->assertSame(1, $result['skipped']);
 
         $rules = $result['rules'];
-        $this->assertNotNull($rules->match(new ServerRequest('GET', '/admin')));
-        $this->assertNotNull($rules->match(new ServerRequest('POST', '/x')));
+        $this->assertSame([700001], $rules->evaluate(new ServerRequest('GET', '/admin'))->matchedRuleIds());
+        $this->assertSame([700002], $rules->evaluate(new ServerRequest('POST', '/x'))->matchedRuleIds());
     }
 
     public function testFromFilesLoadsConcatenatedFiles(): void
@@ -102,8 +102,8 @@ TXT;
             file_put_contents($f2, "SecRule REQUEST_URI \"@contains b\" \"id:710002,phase:2,deny\"\n");
 
             $set = SecRuleLoader::fromFiles([$f1, $f2]);
-            $this->assertSame(710001, $set->match(new ServerRequest('GET', '/a')));
-            $this->assertSame(710002, $set->match(new ServerRequest('GET', '/b')));
+            $this->assertSame([710001], $set->evaluate(new ServerRequest('GET', '/a'))->matchedRuleIds());
+            $this->assertSame([710002], $set->evaluate(new ServerRequest('GET', '/b'))->matchedRuleIds());
         } finally {
             @unlink($dir . '/a.conf');
             @unlink($dir . '/b.conf');
@@ -130,9 +130,9 @@ TXT;
             $set = SecRuleLoader::fromDirectory($dir, $filter);
 
             // Sorted order means rule ids 720001 then 720002 are present; skip.txt ignored
-            $this->assertSame(720001, $set->match(new ServerRequest('GET', '/one')));
-            $this->assertSame(720002, $set->match(new ServerRequest('GET', '/two')));
-            $this->assertNull($set->match(new ServerRequest('GET', '/skip')));
+            $this->assertSame([720001], $set->evaluate(new ServerRequest('GET', '/one'))->matchedRuleIds());
+            $this->assertSame([720002], $set->evaluate(new ServerRequest('GET', '/two'))->matchedRuleIds());
+            $this->assertSame([], $set->evaluate(new ServerRequest('GET', '/skip'))->matchedRuleIds());
         } finally {
             @unlink($dir . '/1.conf');
             @unlink($dir . '/2.conf');

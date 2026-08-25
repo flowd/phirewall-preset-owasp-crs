@@ -79,11 +79,12 @@ final class EveryRulePayloadTest extends TestCase
         $payload = base64_decode($entry['payload_base64'], true);
         $this->assertIsString($payload);
 
-        // Evaluate the rule in isolation so a match can only be attributed to it.
+        // Evaluate the rule in isolation so a match can only be attributed to it;
+        // the matched-rules list is asserted independently of any block decision.
         $isolatedRuleSet = new CoreRuleSet([$rule]);
-        $matchedRuleId = $isolatedRuleSet->match($this->buildRequest($entry['vector'], $payload));
+        $evaluation = $isolatedRuleSet->evaluate($this->buildRequest($entry['vector'], $payload), anomalyThreshold: 1);
 
-        $this->assertSame($id, $matchedRuleId, "Payload for rule {$id} did not trigger it (vector {$entry['vector']}).");
+        $this->assertSame([$id], $evaluation->matchedRuleIds(), "Payload for rule {$id} did not trigger it (vector {$entry['vector']}).");
     }
 
     public function testEveryShippedRuleIsCoveredOrDocumented(): void

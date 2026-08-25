@@ -20,8 +20,8 @@ final class CoreRuleSetInvalidRegexTest extends TestCase
         $coreRuleSet = SecRuleLoader::fromString($rulesText);
 
         // Should not throw and should not match
-        $this->assertNull($coreRuleSet->match(new ServerRequest('GET', '/admin')));
-        $this->assertNull($coreRuleSet->match(new ServerRequest('GET', '/')));
+        $this->assertSame([], $coreRuleSet->evaluate(new ServerRequest('GET', '/admin'))->matchedRuleIds());
+        $this->assertSame([], $coreRuleSet->evaluate(new ServerRequest('GET', '/'))->matchedRuleIds());
     }
 
     public function testRegexWithoutDelimitersIsWrappedAndEvaluated(): void
@@ -29,7 +29,7 @@ final class CoreRuleSetInvalidRegexTest extends TestCase
         // Valid pattern without delimiters should be wrapped and work
         $rulesText = 'SecRule REQUEST_URI "@rx ^/api\\b" "id:800402,phase:2,deny"';
         $coreRuleSet = SecRuleLoader::fromString($rulesText);
-        $this->assertSame(800402, $coreRuleSet->match(new ServerRequest('GET', '/api/v1')));
-        $this->assertNull($coreRuleSet->match(new ServerRequest('GET', '/apix')));
+        $this->assertSame([800402], $coreRuleSet->evaluate(new ServerRequest('GET', '/api/v1'))->matchedRuleIds());
+        $this->assertSame([], $coreRuleSet->evaluate(new ServerRequest('GET', '/apix'))->matchedRuleIds());
     }
 }

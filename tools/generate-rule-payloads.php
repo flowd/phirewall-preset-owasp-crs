@@ -612,7 +612,7 @@ foreach ($ruleFiles as $ruleFile) {
                 continue; // payload not placeable in this vector (e.g. control chars in a header)
             }
 
-            if ($isolated->match($request) === $id) {
+            if ($isolated->evaluate($request, anomalyThreshold: 1)->matchedRuleIds() === [$id]) {
                 $matched = ['vector' => $usedVector, 'payload' => $payload];
                 break;
             }

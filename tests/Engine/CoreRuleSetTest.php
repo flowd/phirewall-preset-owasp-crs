@@ -18,15 +18,15 @@ final class CoreRuleSetTest extends TestCase
 
         $serverRequest = new ServerRequest('GET', '/admin');
         // Initially enabled -> match
-        $this->assertSame(100001, $coreRuleSet->match($serverRequest));
+        $this->assertSame([100001], $coreRuleSet->evaluate($serverRequest)->matchedRuleIds());
 
         // Disable rule -> no match
         $coreRuleSet->disable(100001);
-        $this->assertNull($coreRuleSet->match($serverRequest));
+        $this->assertSame([], $coreRuleSet->evaluate($serverRequest)->matchedRuleIds());
 
         // Enable again -> match
         $coreRuleSet->enable(100001);
-        $this->assertSame(100001, $coreRuleSet->match($serverRequest));
+        $this->assertSame([100001], $coreRuleSet->evaluate($serverRequest)->matchedRuleIds());
     }
 
     public function testIdsReturnsRuleIdsInInsertionOrder(): void
@@ -57,7 +57,7 @@ final class CoreRuleSetTest extends TestCase
 
         $request = (new ServerRequest('GET', '/'))->withQueryParams($queryParams);
 
-        $this->assertSame(100003, $coreRuleSet->match($request), 'An over-cap ARGS request must fail closed');
+        $this->assertSame([100003], $coreRuleSet->evaluate($request)->matchedRuleIds(), 'An over-cap ARGS request must fail closed');
     }
 
     public function testRuleStillFiresWhenMatchingValueIsWithinCap(): void
@@ -69,7 +69,7 @@ final class CoreRuleSetTest extends TestCase
 
         $request = (new ServerRequest('GET', '/'))->withQueryParams(['q' => 'needle']);
 
-        $this->assertSame(100004, $coreRuleSet->match($request));
+        $this->assertSame([100004], $coreRuleSet->evaluate($request)->matchedRuleIds());
     }
 
     public function testCapOnOneVariableDoesNotSuppressRuleTargetingAnother(): void
@@ -86,7 +86,7 @@ final class CoreRuleSetTest extends TestCase
 
         $request = (new ServerRequest('GET', '/path/needle-in-uri'))->withQueryParams($queryParams);
 
-        $this->assertSame(100005, $coreRuleSet->match($request), 'A rule on an un-capped variable must still match');
+        $this->assertSame([100005], $coreRuleSet->evaluate($request)->matchedRuleIds(), 'A rule on an un-capped variable must still match');
     }
 
     public function testRejectsNonPositiveCapAtConstruction(): void
@@ -111,7 +111,7 @@ final class CoreRuleSetTest extends TestCase
         $inner = (new ServerRequest('POST', '/?foo=bar'))->withParsedBody(['baz' => 'qux']);
         $request = new CountingServerRequest($inner);
 
-        $this->assertNull($coreRuleSet->match($request), 'Neither rule matches this request');
+        $this->assertSame([], $coreRuleSet->evaluate($request)->matchedRuleIds(), 'Neither rule matches this request');
         $this->assertSame(1, $request->queryParamReads, 'ARGS query params must be derived once across rules');
         $this->assertSame(1, $request->parsedBodyReads, 'ARGS parsed body must be derived once across rules');
     }

@@ -24,7 +24,7 @@ final class CoreRuleSetPmBoundaryTest extends TestCase
 
         // Should match when URI contains the last phrase within the cap
         $serverRequest = new ServerRequest('GET', '/foo/p5000/bar');
-        $this->assertSame(510000, $coreRuleSet->match($serverRequest));
+        $this->assertSame([510000], $coreRuleSet->evaluate($serverRequest)->matchedRuleIds());
     }
 
     public function testPmIgnoresPhrasesBeyondCap(): void
@@ -42,10 +42,10 @@ final class CoreRuleSetPmBoundaryTest extends TestCase
 
         // URI contains only the 5001st phrase which should have been ignored
         $reqNo = new ServerRequest('GET', '/only-q5001-here');
-        $this->assertNull($coreRuleSet->match($reqNo));
+        $this->assertSame([], $coreRuleSet->evaluate($reqNo)->matchedRuleIds());
 
         // But containing a phrase within the first 5000 should match
         $reqYes = new ServerRequest('GET', '/has-q4999-here');
-        $this->assertSame(510001, $coreRuleSet->match($reqYes));
+        $this->assertSame([510001], $coreRuleSet->evaluate($reqYes)->matchedRuleIds());
     }
 }

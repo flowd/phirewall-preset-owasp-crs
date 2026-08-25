@@ -76,8 +76,13 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
     public function match(ServerRequestInterface $serverRequest): MatchResult
     {
         $coreRuleSet = $this->coreRuleSet();
-        $id = $coreRuleSet->match($serverRequest);
-        if ($id === null) {
+        $evaluation = $coreRuleSet->evaluate($serverRequest);
+        if (!$evaluation->isBlocked()) {
+            return MatchResult::noMatch();
+        }
+
+        $firstMatch = $evaluation->firstMatch();
+        if (!$firstMatch instanceof RuleMatch) {
             return MatchResult::noMatch();
         }
 
@@ -85,15 +90,11 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
         // via Config::enableDiagnosticsHeaders(); owasp_rule_id and msg are
         // structured metadata for event listeners reading the MatchResult.
         $meta = [
-            'owasp_rule_id' => $id,
-            'diagnostic_headers' => ['X-Phirewall-Owasp-Rule' => (string) $id],
+            'owasp_rule_id' => $firstMatch->ruleId,
+            'diagnostic_headers' => ['X-Phirewall-Owasp-Rule' => (string) $firstMatch->ruleId],
         ];
-        $rule = $coreRuleSet->getRule($id);
-        if ($rule instanceof CoreRule) {
-            $msg = $rule->actions['msg'] ?? null;
-            if (is_string($msg) && $msg !== '') {
-                $meta['msg'] = $msg;
-            }
+        if ($firstMatch->message !== null) {
+            $meta['msg'] = $firstMatch->message;
         }
 
         return MatchResult::matched('owasp', $meta);

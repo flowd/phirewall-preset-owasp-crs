@@ -18,7 +18,7 @@ final class CoreRuleSetMethodContainsTest extends TestCase
         $reqPost = new ServerRequest('POST', '/anything');
         $reqGet = new ServerRequest('GET', '/anything');
 
-        $this->assertSame(200100, $coreRuleSet->match($reqPost));
-        $this->assertNull($coreRuleSet->match($reqGet));
+        $this->assertSame([200100], $coreRuleSet->evaluate($reqPost)->matchedRuleIds());
+        $this->assertSame([], $coreRuleSet->evaluate($reqGet)->matchedRuleIds());
     }
 }

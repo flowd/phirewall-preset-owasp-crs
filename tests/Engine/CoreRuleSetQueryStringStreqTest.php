@@ -18,7 +18,7 @@ final class CoreRuleSetQueryStringStreqTest extends TestCase
         $reqNo = new ServerRequest('GET', '/path?token=zzz');
         $reqYes = new ServerRequest('GET', '/path?token=abc123');
 
-        $this->assertNull($coreRuleSet->match($reqNo));
-        $this->assertSame(200202, $coreRuleSet->match($reqYes));
+        $this->assertSame([], $coreRuleSet->evaluate($reqNo)->matchedRuleIds());
+        $this->assertSame([200202], $coreRuleSet->evaluate($reqYes)->matchedRuleIds());
     }
 }

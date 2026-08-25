@@ -210,9 +210,15 @@ final readonly class CoreRule
     /**
      * Evaluate the rule against the request with match detail (matched target,
      * matched value, operator captures) for scoring and logdata expansion.
+     *
+     * A {@see RuleTargetSession} applies runtime exclusions and manipulators to
+     * the collected entries before the operator sees them.
      */
-    public function evaluate(ServerRequestInterface $serverRequest, ?RequestVariableValues $requestVariableValues = null): CoreRuleResult
-    {
+    public function evaluate(
+        ServerRequestInterface $serverRequest,
+        ?RequestVariableValues $requestVariableValues = null,
+        ?RuleTargetSession $ruleTargetSession = null,
+    ): CoreRuleResult {
         // Only evaluate when rule is a blocking (deny) rule. Non-deny rules are ignored here.
         if (($this->actions['deny'] ?? false) !== true) {
             return CoreRuleResult::noMatch();
@@ -220,7 +226,7 @@ final readonly class CoreRule
 
         $requestVariableValues ??= new RequestVariableValues($serverRequest);
 
-        [$labels, $values] = $this->collectTargetValues($requestVariableValues);
+        [$labels, $values] = $this->collectTargetValues($requestVariableValues, $ruleTargetSession);
 
         // Fail closed: if a variable this rule inspects was truncated at the per-variable
         // cap, the dropped portion is un-inspectable, so treat the oversized request as a
@@ -271,7 +277,7 @@ final readonly class CoreRule
      *
      * @return array{0: list<?string>, 1: list<string>}
      */
-    private function collectTargetValues(RequestVariableValues $requestVariableValues): array
+    private function collectTargetValues(RequestVariableValues $requestVariableValues, ?RuleTargetSession $ruleTargetSession): array
     {
         /** @var list<?string> $labels */
         $labels = [];
@@ -279,13 +285,18 @@ final readonly class CoreRule
         $values = [];
         foreach ($this->targets as $target) {
             $exclusions = $this->textExclusions[$target->variable] ?? [];
-            foreach ($requestVariableValues->entriesFor($target->variable) as $entry) {
+            $entries = $ruleTargetSession instanceof RuleTargetSession
+                ? $ruleTargetSession->entriesFor($this, $target->variable)
+                : $requestVariableValues->entriesFor($target->variable);
+            foreach ($entries as $entry) {
                 if ($entry['value'] === '') {
                     continue;
                 }
+
                 if (!$target->matchesName($entry['name'])) {
                     continue;
                 }
+
                 foreach ($exclusions as $exclusion) {
                     if ($exclusion->matchesName($entry['name'])) {
                         continue 2;
