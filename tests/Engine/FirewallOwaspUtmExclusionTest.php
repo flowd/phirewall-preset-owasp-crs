@@ -53,16 +53,13 @@ final class FirewallOwaspUtmExclusionTest extends TestCase
 
     public function testUtmExclusionSilencesTheParameterFamilyButNothingElse(): void
     {
-        $records = [];
-        $logger = new class ($records) extends AbstractLogger {
-            /** @param list<array{level: mixed, context: array<string, mixed>}> $records */
-            public function __construct(private array &$records)
-            {
-            }
+        $logger = new class () extends AbstractLogger {
+            /** @var list<array<string, mixed>> */
+            public array $contexts = [];
 
             public function log($level, \Stringable|string $message, array $context = []): void
             {
-                $this->records[] = ['level' => $level, 'context' => $context];
+                $this->contexts[] = $context;
             }
         };
 
@@ -81,15 +78,14 @@ final class FirewallOwaspUtmExclusionTest extends TestCase
             $firewall->decide($this->requestWithParam('utm_content', $payload))->isBlocked(),
             'The excluded utm parameter family is not inspected',
         );
-        $this->assertSame([], $records, 'No rule matches once the parameter is excluded');
+        $this->assertSame([], $logger->contexts, 'No rule matches once the parameter is excluded');
 
         $this->assertTrue(
             $firewall->decide($this->requestWithParam('q', $payload))->isBlocked(),
             'The same payload in a regular parameter keeps blocking',
         );
-        $this->assertNotSame([], $records);
-        $matchedVariables = array_column(array_column($records, 'context'), 'matched_variable');
-        $this->assertContains('ARGS:q', $matchedVariables);
+        $this->assertNotSame([], $logger->contexts);
+        $this->assertContains('ARGS:q', array_column($logger->contexts, 'matched_variable'));
     }
 
     public function testManipulatorSilencesASingleKnownValueEndToEnd(): void
