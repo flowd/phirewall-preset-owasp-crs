@@ -11,9 +11,9 @@ use Psr\Http\Message\ServerRequestInterface;
  */
 final readonly class RequestMethodCollector implements VariableCollectorInterface
 {
-    /** @return list<string> */
+    /** @return list<array{name: ?string, value: string}> */
     public function collect(ServerRequestInterface $serverRequest): array
     {
-        return [$serverRequest->getMethod()];
+        return [['name' => null, 'value' => $serverRequest->getMethod()]];
     }
 }

@@ -11,12 +11,12 @@ use Psr\Http\Message\ServerRequestInterface;
  */
 final readonly class RequestFilenameCollector implements VariableCollectorInterface
 {
-    /** @return list<string> */
+    /** @return list<array{name: ?string, value: string}> */
     public function collect(ServerRequestInterface $serverRequest): array
     {
         $path = $serverRequest->getUri()->getPath();
         if ($path !== '') {
-            return [basename($path)];
+            return [['name' => null, 'value' => basename($path)]];
         }
 
         return [];

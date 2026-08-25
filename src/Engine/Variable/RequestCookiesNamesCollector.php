@@ -11,14 +11,14 @@ use Psr\Http\Message\ServerRequestInterface;
  */
 final readonly class RequestCookiesNamesCollector implements VariableCollectorInterface
 {
-    /** @return list<string> */
+    /** @return list<array{name: ?string, value: string}> */
     public function collect(ServerRequestInterface $serverRequest): array
     {
-        /** @var list<string> $collected */
+        /** @var list<array{name: ?string, value: string}> $collected */
         $collected = [];
 
         foreach (array_keys($serverRequest->getCookieParams()) as $key) {
-            $collected[] = (string) $key;
+            $collected[] = ['name' => (string) $key, 'value' => (string) $key];
         }
 
         return $collected;

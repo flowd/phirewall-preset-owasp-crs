@@ -22,10 +22,10 @@ use Psr\Http\Message\ServerRequestInterface;
  */
 final readonly class ArgsCollector implements VariableCollectorInterface
 {
-    /** @return list<string> */
+    /** @return list<array{name: ?string, value: string}> */
     public function collect(ServerRequestInterface $serverRequest): array
     {
-        /** @var list<string> $collected */
+        /** @var list<array{name: ?string, value: string}> $collected */
         $collected = [];
 
         $this->collectFrom($serverRequest->getQueryParams(), $collected);
@@ -40,9 +40,11 @@ final readonly class ArgsCollector implements VariableCollectorInterface
 
     /**
      * Append every scalar leaf value and its flattened bracketed name from a parameter map.
+     * Both entries carry the bracketed parameter name, so a name-based exclusion removes
+     * a parameter's value and its injected name entry together.
      *
      * @param array<array-key, mixed> $parameters
-     * @param list<string> $collected
+     * @param list<array{name: ?string, value: string}> $collected
      * @param string $namePrefix Bracketed name accumulated while descending (e.g. "foo[bar]")
      */
     private function collectFrom(array $parameters, array &$collected, string $namePrefix = ''): void
@@ -59,10 +61,10 @@ final readonly class ArgsCollector implements VariableCollectorInterface
             }
 
             if (is_scalar($value)) {
-                $collected[] = (string) $value;
+                $collected[] = ['name' => $name, 'value' => (string) $value];
             }
 
-            $collected[] = $name;
+            $collected[] = ['name' => $name, 'value' => $name];
         }
     }
 }

@@ -20,14 +20,21 @@ use PHPUnit\Framework\TestCase;
 
 final class VariableCollectorTest extends TestCase
 {
-    public function testRequestUriCollectorReturnsPathAndQuery(): void
+    /**
+     * @param list<array{name: ?string, value: string}> $entries
+     * @return list<string>
+     */
+    private function values(array $entries): array
+    {
+        return array_column($entries, 'value');
+    }
+
+    public function testRequestUriCollectorReturnsPathAndQueryUnnamed(): void
     {
         $collector = new RequestUriCollector();
         $request = new ServerRequest('GET', '/admin?x=1');
 
-        $result = $collector->collect($request);
-
-        $this->assertSame(['/admin?x=1'], $result);
+        $this->assertSame([['name' => null, 'value' => '/admin?x=1']], $collector->collect($request));
     }
 
     public function testRequestUriCollectorOmitsQuestionMarkWhenNoQuery(): void
@@ -35,17 +42,15 @@ final class VariableCollectorTest extends TestCase
         $collector = new RequestUriCollector();
         $request = new ServerRequest('GET', '/page');
 
-        $result = $collector->collect($request);
-
-        $this->assertSame(['/page'], $result);
+        $this->assertSame([['name' => null, 'value' => '/page']], $collector->collect($request));
     }
 
     public function testRequestMethodCollectorReturnsMethod(): void
     {
         $collector = new RequestMethodCollector();
 
-        $this->assertSame(['POST'], $collector->collect(new ServerRequest('POST', '/')));
-        $this->assertSame(['GET'], $collector->collect(new ServerRequest('GET', '/')));
+        $this->assertSame([['name' => null, 'value' => 'POST']], $collector->collect(new ServerRequest('POST', '/')));
+        $this->assertSame([['name' => null, 'value' => 'GET']], $collector->collect(new ServerRequest('GET', '/')));
     }
 
     public function testQueryStringCollectorReturnsRawQuery(): void
@@ -53,7 +58,7 @@ final class VariableCollectorTest extends TestCase
         $collector = new QueryStringCollector();
         $request = new ServerRequest('GET', '/path?a=1&b=2');
 
-        $this->assertSame(['a=1&b=2'], $collector->collect($request));
+        $this->assertSame([['name' => null, 'value' => 'a=1&b=2']], $collector->collect($request));
     }
 
     public function testQueryStringCollectorReturnsEmptyStringWhenNoQuery(): void
@@ -61,7 +66,7 @@ final class VariableCollectorTest extends TestCase
         $collector = new QueryStringCollector();
         $request = new ServerRequest('GET', '/path');
 
-        $this->assertSame([''], $collector->collect($request));
+        $this->assertSame([['name' => null, 'value' => '']], $collector->collect($request));
     }
 
     public function testArgsCollectorCollectsQueryAndBodyValuesAndNames(): void
@@ -70,20 +75,32 @@ final class VariableCollectorTest extends TestCase
         $request = (new ServerRequest('POST', '/submit?foo=bar'))
             ->withParsedBody(['token' => 'secret', 'nested' => ['a', 'b']]);
 
-        $result = $collector->collect($request);
+        $values = $this->values($collector->collect($request));
 
         // Query params: value "bar", key "foo"
-        $this->assertContains('bar', $result);
-        $this->assertContains('foo', $result);
+        $this->assertContains('bar', $values);
+        $this->assertContains('foo', $values);
         // Body params: value "secret", key "token", nested values "a"/"b" with bracketed names.
-        $this->assertContains('secret', $result);
-        $this->assertContains('token', $result);
-        $this->assertContains('a', $result);
-        $this->assertContains('b', $result);
+        $this->assertContains('secret', $values);
+        $this->assertContains('token', $values);
+        $this->assertContains('a', $values);
+        $this->assertContains('b', $values);
         // The collected name is the original bracketed parameter, not each path segment.
-        $this->assertContains('nested[0]', $result);
-        $this->assertContains('nested[1]', $result);
-        $this->assertNotContains('nested', $result);
+        $this->assertContains('nested[0]', $values);
+        $this->assertContains('nested[1]', $values);
+        $this->assertNotContains('nested', $values);
+    }
+
+    public function testArgsCollectorAttributesValueAndNameEntriesToTheParameter(): void
+    {
+        $collector = new ArgsCollector();
+        $request = (new ServerRequest('GET', '/'))
+            ->withQueryParams(['utm_source' => 'facebook']);
+
+        $this->assertSame([
+            ['name' => 'utm_source', 'value' => 'facebook'],
+            ['name' => 'utm_source', 'value' => 'utm_source'],
+        ], $collector->collect($request));
     }
 
     public function testArgsCollectorCollectsDeeplyNestedValuesWithBracketedNames(): void
@@ -96,22 +113,24 @@ final class VariableCollectorTest extends TestCase
             ->withQueryParams(['a' => ['b' => ['c' => 'queryPayload']]])
             ->withParsedBody(['x' => ['y' => ['z' => 'bodyPayload']]]);
 
-        $result = $collector->collect($request);
+        $entries = $collector->collect($request);
+        $values = $this->values($entries);
 
-        $this->assertContains('queryPayload', $result);
-        $this->assertContains('bodyPayload', $result);
-        $this->assertContains('a[b][c]', $result);
-        $this->assertContains('x[y][z]', $result);
-        $this->assertNotContains('a', $result);
-        $this->assertNotContains('b', $result);
+        $this->assertContains('queryPayload', $values);
+        $this->assertContains('bodyPayload', $values);
+        $this->assertContains('a[b][c]', $values);
+        $this->assertContains('x[y][z]', $values);
+        $this->assertNotContains('a', $values);
+        $this->assertNotContains('b', $values);
+        $this->assertContains(['name' => 'a[b][c]', 'value' => 'queryPayload'], $entries);
     }
 
     public function testArgsCollectorCollectsValueAndNameForEveryParameterWithoutTruncating(): void
     {
         $collector = new ArgsCollector();
 
-        // The collector no longer caps: it returns a value AND a name for every parameter.
-        // Bounding the value count (and failing closed when exceeded) is applied centrally
+        // The collector no longer caps: it returns a value AND a name entry for every parameter.
+        // Bounding the entry count (and failing closed when exceeded) is applied centrally
         // by RequestVariableValues, so a parameter is never half-collected here.
         $queryParams = [];
         for ($index = 0; $index < 50; ++$index) {
@@ -131,25 +150,28 @@ final class VariableCollectorTest extends TestCase
         $request = (new ServerRequest('POST', '/x?foo=1&bar=2'))
             ->withParsedBody(['token' => 'v']);
 
-        $result = $collector->collect($request);
+        $entries = $collector->collect($request);
+        $values = $this->values($entries);
 
-        $this->assertContains('foo', $result);
-        $this->assertContains('bar', $result);
-        $this->assertContains('token', $result);
-        $this->assertNotContains('1', $result);
-        $this->assertNotContains('2', $result);
-        $this->assertNotContains('v', $result);
+        $this->assertContains('foo', $values);
+        $this->assertContains('bar', $values);
+        $this->assertContains('token', $values);
+        $this->assertNotContains('1', $values);
+        $this->assertNotContains('2', $values);
+        $this->assertNotContains('v', $values);
+        $this->assertContains(['name' => 'foo', 'value' => 'foo'], $entries);
     }
 
-    public function testRequestCookiesCollectorReturnsCookieValues(): void
+    public function testRequestCookiesCollectorReturnsCookieValuesWithNames(): void
     {
         $collector = new RequestCookiesCollector();
         $request = (new ServerRequest('GET', '/'))
             ->withCookieParams(['session' => 'abc', 'flavor' => 'chocolate']);
 
-        $result = $collector->collect($request);
-
-        $this->assertSame(['abc', 'chocolate'], $result);
+        $this->assertSame([
+            ['name' => 'session', 'value' => 'abc'],
+            ['name' => 'flavor', 'value' => 'chocolate'],
+        ], $collector->collect($request));
     }
 
     public function testRequestCookiesCollectorFlattensNestedCookieArrays(): void
@@ -164,9 +186,11 @@ final class VariableCollectorTest extends TestCase
                 'foo' => ['a' => '1', 'b' => ['c' => 'payload']],
             ]);
 
-        $result = $collector->collect($request);
-
-        $this->assertSame(['abc', '1', 'payload'], $result);
+        $this->assertSame([
+            ['name' => 'session', 'value' => 'abc'],
+            ['name' => 'foo[a]', 'value' => '1'],
+            ['name' => 'foo[b][c]', 'value' => 'payload'],
+        ], $collector->collect($request));
     }
 
     public function testRequestCookiesNamesCollectorReturnsCookieKeys(): void
@@ -175,23 +199,32 @@ final class VariableCollectorTest extends TestCase
         $request = (new ServerRequest('GET', '/'))
             ->withCookieParams(['session' => 'abc', 'flavor' => 'vanilla']);
 
-        $result = $collector->collect($request);
-
-        $this->assertSame(['session', 'flavor'], $result);
+        $this->assertSame([
+            ['name' => 'session', 'value' => 'session'],
+            ['name' => 'flavor', 'value' => 'flavor'],
+        ], $collector->collect($request));
     }
 
-    public function testRequestHeadersCollectorReturnsAllHeaderValues(): void
+    public function testRequestHeadersCollectorReturnsAllHeaderValuesWithNames(): void
     {
         $collector = new RequestHeadersCollector();
         $request = (new ServerRequest('GET', '/'))
             ->withHeader('User-Agent', ['Mozilla/5.0', 'Extra'])
             ->withHeader('Accept', 'text/html');
 
-        $result = $collector->collect($request);
+        $entries = $collector->collect($request);
+        $values = $this->values($entries);
 
-        $this->assertContains('Mozilla/5.0', $result);
-        $this->assertContains('Extra', $result);
-        $this->assertContains('text/html', $result);
+        $this->assertContains('Mozilla/5.0', $values);
+        $this->assertContains('Extra', $values);
+        $this->assertContains('text/html', $values);
+
+        foreach ($entries as $entry) {
+            if ($entry['value'] === 'Mozilla/5.0' || $entry['value'] === 'Extra') {
+                $this->assertNotNull($entry['name']);
+                $this->assertSame('user-agent', strtolower($entry['name']));
+            }
+        }
     }
 
     public function testRequestHeadersNamesCollectorReturnsHeaderNames(): void
@@ -201,10 +234,10 @@ final class VariableCollectorTest extends TestCase
             ->withHeader('X-Test', '1')
             ->withHeader('Content-Type', 'text/plain');
 
-        $result = $collector->collect($request);
+        $values = $this->values($collector->collect($request));
 
         // Nyholm PSR-7 normalizes header names
-        $lowered = array_map('strtolower', $result);
+        $lowered = array_map('strtolower', $values);
         $this->assertContains('x-test', $lowered);
         $this->assertContains('content-type', $lowered);
     }
@@ -214,7 +247,7 @@ final class VariableCollectorTest extends TestCase
         $collector = new RequestFilenameCollector();
         $request = new ServerRequest('GET', '/uploads/photo.jpg');
 
-        $this->assertSame(['photo.jpg'], $collector->collect($request));
+        $this->assertSame([['name' => null, 'value' => 'photo.jpg']], $collector->collect($request));
     }
 
     public function testRequestFilenameCollectorReturnsEmptyForEmptyPath(): void

@@ -28,6 +28,23 @@ final class RequestVariableValuesTest extends TestCase
         $this->assertSame(1, $request->parsedBodyReads, 'getParsedBody() must be derived once per request');
     }
 
+    public function testEntriesCarryMemberNamesAndShareTheMemoWithValuesFor(): void
+    {
+        $inner = (new ServerRequest('GET', '/?utm_source=facebook'));
+        $request = new CountingServerRequest($inner);
+        $memo = new RequestVariableValues($request);
+
+        $entries = $memo->entriesFor('ARGS');
+        $values = $memo->valuesFor('ARGS');
+
+        $this->assertSame([
+            ['name' => 'utm_source', 'value' => 'facebook'],
+            ['name' => 'utm_source', 'value' => 'utm_source'],
+        ], $entries);
+        $this->assertSame(['facebook', 'utm_source'], $values);
+        $this->assertSame(1, $request->queryParamReads, 'valuesFor() must reuse the entries memo');
+    }
+
     public function testUnknownVariableYieldsEmptyListAndCaches(): void
     {
         $memo = new RequestVariableValues(new ServerRequest('GET', '/'));

@@ -33,11 +33,11 @@ final class RequestVariableValues
     public const DEFAULT_MAX_VALUES_PER_CRS_VARIABLE = 2000;
 
     /**
-     * Collected values cache keyed by variable name.
+     * Collected entries cache keyed by variable name.
      *
-     * @var array<string, list<string>>
+     * @var array<string, list<array{name: ?string, value: string}>>
      */
-    private array $valuesByVariableName = [];
+    private array $entriesByVariableName = [];
 
     /**
      * Names of variables whose collected values were truncated at the cap this request.
@@ -92,20 +92,24 @@ final class RequestVariableValues
     }
 
     /**
-     * Return the collected values for the given variable name, collecting them once and
+     * Return the collected entries for the given variable name, collecting them once and
      * caching the result for subsequent rules. Unknown variable names yield an empty list.
      *
-     * @return list<string>
+     * The per-variable cap counts entries and is applied here, before any exclusion or
+     * manipulation: a request padded past the cap fails closed regardless of how many of
+     * its entries a rule would later exclude.
+     *
+     * @return list<array{name: ?string, value: string}>
      */
-    public function valuesFor(string $variableName): array
+    public function entriesFor(string $variableName): array
     {
-        if (isset($this->valuesByVariableName[$variableName])) {
-            return $this->valuesByVariableName[$variableName];
+        if (isset($this->entriesByVariableName[$variableName])) {
+            return $this->entriesByVariableName[$variableName];
         }
 
         $collector = VariableCollectorFactory::create($variableName);
         if (!$collector instanceof VariableCollectorInterface) {
-            return $this->valuesByVariableName[$variableName] = [];
+            return $this->entriesByVariableName[$variableName] = [];
         }
 
         $collected = $collector->collect($this->serverRequest);
@@ -114,7 +118,17 @@ final class RequestVariableValues
             $this->cappedVariables[$variableName] = true;
         }
 
-        return $this->valuesByVariableName[$variableName] = $collected;
+        return $this->entriesByVariableName[$variableName] = $collected;
+    }
+
+    /**
+     * The collected values for the given variable name, without member-name attribution.
+     *
+     * @return list<string>
+     */
+    public function valuesFor(string $variableName): array
+    {
+        return array_column($this->entriesFor($variableName), 'value');
     }
 
     /**

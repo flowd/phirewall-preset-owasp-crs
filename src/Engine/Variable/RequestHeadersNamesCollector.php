@@ -11,14 +11,14 @@ use Psr\Http\Message\ServerRequestInterface;
  */
 final readonly class RequestHeadersNamesCollector implements VariableCollectorInterface
 {
-    /** @return list<string> */
+    /** @return list<array{name: ?string, value: string}> */
     public function collect(ServerRequestInterface $serverRequest): array
     {
-        /** @var list<string> $collected */
+        /** @var list<array{name: ?string, value: string}> $collected */
         $collected = [];
 
         foreach (array_keys($serverRequest->getHeaders()) as $name) {
-            $collected[] = (string) $name;
+            $collected[] = ['name' => (string) $name, 'value' => (string) $name];
         }
 
         return $collected;

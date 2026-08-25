@@ -11,21 +11,21 @@ use Psr\Http\Message\ServerRequestInterface;
  */
 final readonly class ArgsNamesCollector implements VariableCollectorInterface
 {
-    /** @return list<string> */
+    /** @return list<array{name: ?string, value: string}> */
     public function collect(ServerRequestInterface $serverRequest): array
     {
-        /** @var list<string> $collected */
+        /** @var list<array{name: ?string, value: string}> $collected */
         $collected = [];
 
         $queryParams = $serverRequest->getQueryParams();
         foreach (array_keys($queryParams) as $key) {
-            $collected[] = (string) $key;
+            $collected[] = ['name' => (string) $key, 'value' => (string) $key];
         }
 
         $parsed = $serverRequest->getParsedBody();
         if (is_array($parsed)) {
             foreach (array_keys($parsed) as $key) {
-                $collected[] = (string) $key;
+                $collected[] = ['name' => (string) $key, 'value' => (string) $key];
             }
         }
 
