@@ -332,7 +332,7 @@ final readonly class CoreRule
                     continue;
                 }
 
-                if (!$target->matchesName($entry['name'])) {
+                if (!$target->selectsForInclusion($entry['name'])) {
                     continue;
                 }
 

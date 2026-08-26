@@ -30,6 +30,9 @@ final readonly class TargetSelector
         'REQUEST_METHOD',
     ];
 
+    /** Upper bound on an attacker-controlled member name fed to a name-pattern regex (ReDoS guard). */
+    private const MAX_MATCHABLE_NAME_LENGTH = 1024;
+
     private function __construct(
         public string $variable,
         public ?string $name,
@@ -91,6 +94,10 @@ final readonly class TargetSelector
     /**
      * Whether an entry with the given member name is selected. Bare selectors
      * match any entry, including unnamed ones.
+     *
+     * Exclusion semantics: an inconclusive name-pattern result (over-long name or a
+     * PCRE engine error) folds to NO match, so the entry is NOT excluded and stays
+     * under inspection - the fail-closed direction for a negated selector.
      */
     public function matchesName(?string $entryName): bool
     {
@@ -108,7 +115,40 @@ final readonly class TargetSelector
                 : $this->name === $entryName;
         }
 
-        return $this->namePattern !== null && preg_match($this->namePattern, $entryName) === 1;
+        return $this->namePattern !== null && $this->matchesNamePattern($entryName) === 1;
+    }
+
+    /**
+     * Whether a positive selector selects an entry for INSPECTION. Differs from
+     * {@see matchesName()} only for a name-pattern selector: an inconclusive result
+     * (over-long name or PCRE engine error) folds to a match, keeping the entry under
+     * inspection - the fail-closed direction for a positive selector, so a crafted
+     * name cannot make its value evade the rule.
+     */
+    public function selectsForInclusion(?string $entryName): bool
+    {
+        if ($this->namePattern === null || $entryName === null) {
+            return $this->matchesName($entryName);
+        }
+
+        return $this->matchesNamePattern($entryName) !== 0;
+    }
+
+    /**
+     * Match the member name against this selector's name pattern.
+     *
+     * @return int 1 on match, 0 on definite no-match, -1 when inconclusive (the name
+     *             exceeds {@see self::MAX_MATCHABLE_NAME_LENGTH} or the PCRE engine errored)
+     */
+    private function matchesNamePattern(string $entryName): int
+    {
+        if ($this->namePattern === null || strlen($entryName) > self::MAX_MATCHABLE_NAME_LENGTH) {
+            return -1;
+        }
+
+        $result = preg_match($this->namePattern, $entryName);
+
+        return $result === false ? -1 : $result;
     }
 
     /**

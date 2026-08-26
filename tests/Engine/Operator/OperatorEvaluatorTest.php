@@ -13,6 +13,7 @@ use Flowd\PhirewallPresetOwaspCrs\Engine\Operator\RegexEvaluator;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Operator\StartsWithEvaluator;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Operator\StringEqualEvaluator;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Operator\UnsupportedOperatorEvaluator;
+use Flowd\PhirewallPresetOwaspCrs\Engine\RuleOutcome;
 use org\bovigo\vfs\vfsStream;
 use PHPUnit\Framework\TestCase;
 
@@ -183,26 +184,50 @@ final class OperatorEvaluatorTest extends TestCase
     public function testPhraseMatchFromFileEvaluatorLoadsAndMatches(): void
     {
         $root = vfsStream::setup('rules');
-        vfsStream::newFile('phrases.txt')->at($root)->setContent("admin\nsecret\n");
-        $file = $root->getChild('phrases.txt')->url();
+        vfsStream::newFile('loads.txt')->at($root)->setContent("admin\nsecret\n");
 
-        $evaluator = new PhraseMatchFromFileEvaluator($file);
+        // Operand relative to the context folder, mirroring how the loader resolves
+        // shipped rules; a raw stream-wrapper operand is rejected (see below).
+        $evaluator = new PhraseMatchFromFileEvaluator('loads.txt', $root->url());
         $this->assertTrue($evaluator->evaluate(['/admin/path']));
         $this->assertFalse($evaluator->evaluate(['/safe']));
     }
 
+    public function testPhraseMatchFromFileEvaluatorRejectsStreamWrapperOperand(): void
+    {
+        // A URL-scheme / stream-wrapper operand must never be read: with no context
+        // folder 'file:///etc/passwd' would otherwise be loaded directly. It fails
+        // closed instead of reading the file.
+        $evaluator = new PhraseMatchFromFileEvaluator('file:///etc/passwd');
+
+        $this->assertSame(RuleOutcome::FailClosed, $evaluator->outcome(['root:x:0:0'])->outcome);
+        $this->assertTrue($evaluator->evaluate(['root:x:0:0']));
+    }
+
     public function testPhraseMatchFromFileEvaluatorMissingFileReturnsFalse(): void
     {
-        $evaluator = new PhraseMatchFromFileEvaluator('/nonexistent/path.txt');
+        $evaluator = new PhraseMatchFromFileEvaluator('nonexistent/path.txt');
         $this->assertFalse($evaluator->evaluate(['anything']));
+    }
+
+    public function testPhraseMatchFromFileEvaluatorAbsoluteOperandFailsClosed(): void
+    {
+        // Unconditional absolute-path rejection: without a context folder an absolute
+        // operand would otherwise be read directly (arbitrary-file read). It must not
+        // read the file, and must fail closed rather than throw out of the matcher.
+        $evaluator = new PhraseMatchFromFileEvaluator('/etc/passwd');
+
+        $this->assertSame(RuleOutcome::FailClosed, $evaluator->outcome(['root:x:0:0'])->outcome);
+        $this->assertTrue($evaluator->evaluate(['root:x:0:0']));
     }
 
     public function testPhraseMatchFromFileEvaluatorRejectsPathTraversal(): void
     {
+        // An unsafe operand fails closed (deterministic block) instead of throwing.
         $evaluator = new PhraseMatchFromFileEvaluator('../../etc/passwd');
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Path traversal detected');
-        $evaluator->evaluate(['test']);
+
+        $this->assertSame(RuleOutcome::FailClosed, $evaluator->outcome(['test'])->outcome);
+        $this->assertTrue($evaluator->evaluate(['test']));
     }
 
     public function testPhraseMatchFromFileEvaluatorUsesContextFolder(): void
@@ -222,9 +247,7 @@ final class OperatorEvaluatorTest extends TestCase
 
         $evaluator = new PhraseMatchFromFileEvaluator('/etc/passwd', $root->url() . '/sub');
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Absolute path not permitted');
-        $evaluator->evaluate(['test']);
+        $this->assertSame(RuleOutcome::FailClosed, $evaluator->outcome(['test'])->outcome);
     }
 
     public function testPhraseMatchFromFileEvaluatorRejectsWindowsAbsoluteOperandWithContextFolder(): void
@@ -234,9 +257,7 @@ final class OperatorEvaluatorTest extends TestCase
 
         $evaluator = new PhraseMatchFromFileEvaluator('C:\\Windows\\System32\\drivers\\etc\\hosts', $root->url() . '/sub');
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Absolute path not permitted');
-        $evaluator->evaluate(['test']);
+        $this->assertSame(RuleOutcome::FailClosed, $evaluator->outcome(['test'])->outcome);
     }
 
     public function testPhraseMatchFromFileEvaluatorRejectsUncAbsoluteOperandWithContextFolder(): void
@@ -246,9 +267,7 @@ final class OperatorEvaluatorTest extends TestCase
 
         $evaluator = new PhraseMatchFromFileEvaluator('\\\\server\\share\\phrases.txt', $root->url() . '/sub');
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Absolute path not permitted');
-        $evaluator->evaluate(['test']);
+        $this->assertSame(RuleOutcome::FailClosed, $evaluator->outcome(['test'])->outcome);
     }
 
     public function testPhraseMatchFromFileEvaluatorConfinementRejectsResolvedEscape(): void
@@ -278,10 +297,9 @@ final class OperatorEvaluatorTest extends TestCase
     {
         $root = vfsStream::setup('rules');
         $content = "# this is a comment\nadmin\n# another comment\n";
-        vfsStream::newFile('phrases.txt')->at($root)->setContent($content);
-        $file = $root->getChild('phrases.txt')->url();
+        vfsStream::newFile('comments.txt')->at($root)->setContent($content);
 
-        $evaluator = new PhraseMatchFromFileEvaluator($file);
+        $evaluator = new PhraseMatchFromFileEvaluator('comments.txt', $root->url());
         $this->assertTrue($evaluator->evaluate(['/admin']));
         $this->assertFalse($evaluator->evaluate(['/comment']));
     }

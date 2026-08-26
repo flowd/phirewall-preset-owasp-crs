@@ -57,10 +57,10 @@ RULE;
 
     public function testFromFileConfinesPmFromFileToRuleDirectory(): void
     {
-        // A single-file load must apply the same @pmFromFile confinement as
-        // fromFiles()/fromDirectory(): the rule's @pmFromFile operand pointing
-        // at an absolute path outside the rule file's directory is rejected
-        // rather than silently read (arbitrary file read).
+        // A single-file load applies the same @pmFromFile confinement as
+        // fromFiles()/fromDirectory(): an absolute operand is rejected rather than
+        // silently read (arbitrary file read), and the rule fails closed (a
+        // deterministic block) instead of throwing out of the matcher.
         $root = vfsStream::setup('rules');
         vfsStream::newFile('crs.conf')
             ->withContent('SecRule REQUEST_URI "@pmFromFile /etc/passwd" "id:730001,phase:2,deny"' . "\n")
@@ -68,9 +68,10 @@ RULE;
 
         $coreRuleSet = SecRuleLoader::fromFile($root->url() . '/crs.conf');
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Absolute path not permitted');
-        $coreRuleSet->evaluate(new ServerRequest('GET', '/anything'));
+        $evaluation = $coreRuleSet->evaluate(new ServerRequest('GET', '/anything'));
+
+        $this->assertTrue($evaluation->isBlocked());
+        $this->assertTrue($evaluation->failClosed);
     }
 
     public function testFromStringWithReportCountsParsedAndSkipped(): void

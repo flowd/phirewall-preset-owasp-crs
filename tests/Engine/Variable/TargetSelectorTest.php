@@ -125,4 +125,30 @@ final class TargetSelectorTest extends TestCase
             $this->assertStringContainsString('manipulator', $invalidArgumentException->getMessage());
         }
     }
+
+    public function testSelectsForInclusionMatchesLikeMatchesNameForConclusiveResults(): void
+    {
+        $pattern = TargetSelector::parse('ARGS:/^utm_/');
+        $this->assertTrue($pattern->selectsForInclusion('utm_source'));
+        $this->assertFalse($pattern->selectsForInclusion('query'));
+        $this->assertFalse($pattern->selectsForInclusion(null));
+
+        // Bare and exact-name selectors behave identically to matchesName().
+        $bare = TargetSelector::parse('ARGS');
+        $this->assertTrue($bare->selectsForInclusion('anything'));
+        $exact = TargetSelector::parse('ARGS:redirect');
+        $this->assertTrue($exact->selectsForInclusion('redirect'));
+        $this->assertFalse($exact->selectsForInclusion('other'));
+    }
+
+    public function testOverLongNameFailsClosedForPositiveSelectorButNotForExclusion(): void
+    {
+        $pattern = TargetSelector::parse('ARGS:/^utm_/');
+        $overLongName = str_repeat('a', 4096); // exceeds the matchable-name bound
+
+        // Positive inclusion: an un-evaluable name is kept for inspection (fail closed).
+        $this->assertTrue($pattern->selectsForInclusion($overLongName));
+        // Exclusion semantics: an un-evaluable name is NOT excluded, so it stays inspected too.
+        $this->assertFalse($pattern->matchesName($overLongName));
+    }
 }
