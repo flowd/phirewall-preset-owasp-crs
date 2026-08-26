@@ -32,6 +32,9 @@ final class CoreRuleSet
 
     private readonly RuleTargetConfig $ruleTargetConfig;
 
+    /** Longest single value an operator inspects; a longer value fails closed. See {@see setMaxInspectableValueLength()}. */
+    private int $maxInspectableValueLength = CoreRule::MAX_INSPECTABLE_VALUE_LENGTH;
+
     /**
      * @param iterable<CoreRule> $rules
      * @param int|null $maxValuesPerCrsVariable Per-variable value cap applied while evaluating a
@@ -158,6 +161,30 @@ final class CoreRuleSet
     }
 
     /**
+     * Set the longest single collected value an operator inspects (default
+     * {@see CoreRule::MAX_INSPECTABLE_VALUE_LENGTH}). A longer value is
+     * un-inspectable and fails closed (blocks). Raising it lets larger single
+     * values through (e.g. long tokens in a cookie or `Authorization` header,
+     * base64 fields) but lets a larger subject reach the regex engine, growing
+     * the worst-case backtracking this cap bounds; lowering it tightens both.
+     * Must be a positive integer.
+     *
+     * @throws \InvalidArgumentException When $bytes is not positive.
+     */
+    public function setMaxInspectableValueLength(int $bytes): self
+    {
+        if ($bytes < 1) {
+            throw new \InvalidArgumentException(
+                sprintf('$bytes must be a positive integer, %d given.', $bytes),
+            );
+        }
+
+        $this->maxInspectableValueLength = $bytes;
+
+        return $this;
+    }
+
+    /**
      * Evaluate the request against all enabled rules with anomaly scoring.
      *
      * Rules are evaluated in insertion order; each match adds the rule's
@@ -195,7 +222,7 @@ final class CoreRuleSet
                 continue;
             }
 
-            $coreRuleResult = $rule->evaluate($serverRequest, $requestVariableValues, $ruleTargetSession);
+            $coreRuleResult = $rule->evaluate($serverRequest, $requestVariableValues, $ruleTargetSession, $this->maxInspectableValueLength);
             if ($coreRuleResult->outcome === RuleOutcome::NoMatch) {
                 continue;
             }

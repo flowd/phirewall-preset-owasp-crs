@@ -24,6 +24,19 @@ use Psr\Http\Message\ServerRequestInterface;
  */
 final readonly class CoreRule
 {
+    /**
+     * Default longest single collected value an operator inspects. A longer value
+     * is un-inspectable and the rule fails closed: matching only a head window
+     * would let a payload evade by padding past the limit (@rx), and the
+     * phrase/substring operators would otherwise scan the whole value, turning
+     * one oversized field into unbounded CPU. This mirrors the fail-closed
+     * contract of the per-variable count cap in {@see RequestVariableValues}.
+     * It also bounds worst-case regex backtracking, since no value longer than
+     * this ever reaches the pattern. Override per rule set via
+     * {@see CoreRuleSet::setMaxInspectableValueLength()}.
+     */
+    public const MAX_INSPECTABLE_VALUE_LENGTH = 2048;
+
     /** Resolved operator evaluator for this rule. */
     private OperatorEvaluatorInterface $operatorEvaluator;
 
@@ -218,7 +231,17 @@ final readonly class CoreRule
         ServerRequestInterface $serverRequest,
         ?RequestVariableValues $requestVariableValues = null,
         ?RuleTargetSession $ruleTargetSession = null,
+        int $maxInspectableValueLength = self::MAX_INSPECTABLE_VALUE_LENGTH,
     ): CoreRuleResult {
+        // A non-positive limit would fail every non-empty value closed, silently blocking
+        // all traffic. CoreRuleSet/CoreRuleSetMatcher already enforce this; enforce it here
+        // too so a direct caller cannot pass 0/negative unnoticed.
+        if ($maxInspectableValueLength < 1) {
+            throw new \InvalidArgumentException(
+                sprintf('$maxInspectableValueLength must be a positive integer, %d given.', $maxInspectableValueLength),
+            );
+        }
+
         // Only evaluate when rule is a blocking (deny) rule. Non-deny rules are ignored here.
         if (($this->actions['deny'] ?? false) !== true) {
             return CoreRuleResult::noMatch();
@@ -234,6 +257,16 @@ final readonly class CoreRule
         foreach ($this->targets as $target) {
             if ($requestVariableValues->wasCapped($target->variable)) {
                 return CoreRuleResult::failClosed($target->variable);
+            }
+        }
+
+        // Fail closed on any single value longer than the inspection limit: its tail is
+        // un-inspectable, so head-only matching would let a payload evade by padding, and
+        // the phrase/substring operators would scan the full value at unbounded cost. This
+        // also keeps oversized subjects away from the regex engine, bounding backtracking.
+        foreach ($values as $index => $value) {
+            if (strlen($value) > $maxInspectableValueLength) {
+                return CoreRuleResult::failClosed($labels[$index] ?? null);
             }
         }
 

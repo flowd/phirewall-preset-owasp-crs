@@ -238,6 +238,26 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
     }
 
     /**
+     * Set the per-value inspection length; see {@see CoreRuleSet::setMaxInspectableValueLength()}.
+     *
+     * @throws \InvalidArgumentException When $bytes is not positive.
+     */
+    public function setMaxInspectableValueLength(int $bytes): self
+    {
+        if ($bytes < 1) {
+            throw new \InvalidArgumentException(
+                sprintf('$bytes must be a positive integer, %d given.', $bytes),
+            );
+        }
+
+        $this->configure(static function (CoreRuleSet $coreRuleSet) use ($bytes): void {
+            $coreRuleSet->setMaxInspectableValueLength($bytes);
+        });
+
+        return $this;
+    }
+
+    /**
      * Apply a configuration step now, or queue it until the rule set is loaded.
      *
      * @param \Closure(CoreRuleSet): void $configuration

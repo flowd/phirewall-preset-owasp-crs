@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Flowd\PhirewallPresetOwaspCrs\Tests\Engine\Operator;
 
-use Flowd\Phirewall\Matchers\Support\RegexMatcher;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Operator\ContainsEvaluator;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Operator\EndsWithEvaluator;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Operator\OperatorEvaluatorFactory;
@@ -19,9 +18,10 @@ use PHPUnit\Framework\TestCase;
 
 final class OperatorEvaluatorTest extends TestCase
 {
-    private const REGEX_MAX_SUBJECT_LENGTH = RegexMatcher::MAX_SUBJECT_LENGTH;
-
     // --- RegexEvaluator ---
+    // Subject-length bounding lives in CoreRule (MAX_INSPECTABLE_VALUE_LENGTH), not in the
+    // operator: CoreRule fails closed on an oversized value before it reaches an evaluator,
+    // so the evaluator inspects the full value it is given. See CoreRuleSubjectLimitTest.
 
     public function testRegexEvaluatorMatchesPattern(): void
     {
@@ -36,27 +36,11 @@ final class OperatorEvaluatorTest extends TestCase
         $this->assertFalse($evaluator->evaluate(['/admin']));
     }
 
-    public function testRegexEvaluatorDoesNotMatchPayloadBeyondMaxLength(): void
-    {
-        // Truncation still bounds inspection: content that only appears after the limit is
-        // not seen, so a pattern matching only that tail does not fire.
-        $evaluator = new RegexEvaluator('needle');
-        $oversizedValue = str_repeat('a', self::REGEX_MAX_SUBJECT_LENGTH) . 'needle';
-        $this->assertFalse($evaluator->evaluate([$oversizedValue]));
-    }
-
     public function testRegexEvaluatorMatchesWithinLengthLimit(): void
     {
         $evaluator = new RegexEvaluator('hello');
         $valueWithinLimit = str_repeat('a', 100) . 'hello';
         $this->assertTrue($evaluator->evaluate([$valueWithinLimit]));
-    }
-
-    public function testRegexEvaluatorMatchesAtExactlyMaxLength(): void
-    {
-        $evaluator = new RegexEvaluator('a');
-        $exactLimitValue = str_repeat('a', self::REGEX_MAX_SUBJECT_LENGTH);
-        $this->assertTrue($evaluator->evaluate([$exactLimitValue]));
     }
 
     public function testRegexEvaluatorTreatsEngineErrorOnMalformedUtf8AsMatch(): void
@@ -68,36 +52,6 @@ final class OperatorEvaluatorTest extends TestCase
         $malformedSubject = "select \xff\xfe from users";
 
         $this->assertTrue($evaluator->evaluate([$malformedSubject]));
-    }
-
-    public function testRegexEvaluatorInspectsHeadOfOversizedValue(): void
-    {
-        // A payload within the first MAX_SUBJECT_LENGTH bytes must be inspected even when
-        // the value is padded past the limit.
-        $evaluator = new RegexEvaluator('attack');
-        $paddedValue = 'attack' . str_repeat('A', self::REGEX_MAX_SUBJECT_LENGTH);
-
-        $this->assertTrue($evaluator->evaluate([$paddedValue]));
-    }
-
-    public function testRegexEvaluatorDoesNotFalselyMatchValidUtf8TruncatedMidCharacter(): void
-    {
-        // Byte-truncating a valid UTF-8 value can split a trailing multi-byte character, making
-        // the truncated subject invalid under /u. That must not be reported as a match: a valid
-        // long input that does not contain the pattern stays a no-match.
-        $evaluator = new RegexEvaluator('attack');
-        // 3-byte euro sign; MAX_SUBJECT_LENGTH is not a multiple of 3, so truncation lands mid-char.
-        $value = str_repeat("\xE2\x82\xAC", intdiv(self::REGEX_MAX_SUBJECT_LENGTH, 3) + 1);
-
-        $this->assertFalse($evaluator->evaluate([$value]));
-    }
-
-    public function testRegexEvaluatorStillMatchesShorterValueWhenOverlengthPresent(): void
-    {
-        $evaluator = new RegexEvaluator('match');
-        $oversized = str_repeat('x', self::REGEX_MAX_SUBJECT_LENGTH + 1) . 'match';
-        $normal = 'this should match';
-        $this->assertTrue($evaluator->evaluate([$oversized, $normal]));
     }
 
     public function testRegexEvaluatorWrapsBarePattern(): void

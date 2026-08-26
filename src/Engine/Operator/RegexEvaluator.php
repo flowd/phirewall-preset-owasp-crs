@@ -15,18 +15,18 @@ namespace Flowd\PhirewallPresetOwaspCrs\Engine\Operator;
  * character (notably backticks in rule 942510), turning those characters into
  * PCRE delimiters and collapsing the rule to its inner alternation.
  *
- * Values exceeding {@see self::MAX_SUBJECT_LENGTH} bytes are truncated to that length
- * and the head is inspected, bounding regex work on attacker-controlled input without letting a
- * payload evade detection simply by padding past the limit. A subject that triggers a PCRE engine
- * error (malformed UTF-8 under the /u flag, backtrack/recursion limit) fails closed so a crafted
- * value cannot disable a rule by forcing the error; {@see outcome()} reports it as
+ * Subject length is bounded upstream: {@see \Flowd\PhirewallPresetOwaspCrs\Engine\CoreRule}
+ * fails closed on any value longer than the rule set's configured per-value limit
+ * (default {@see \Flowd\PhirewallPresetOwaspCrs\Engine\CoreRule::MAX_INSPECTABLE_VALUE_LENGTH},
+ * overridable via {@see \Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSet::setMaxInspectableValueLength()})
+ * before it reaches an operator, so this evaluator only ever sees values within that
+ * configured limit and does not truncate. A subject that triggers a PCRE engine error (malformed
+ * UTF-8 under the /u flag, backtrack/recursion limit) fails closed so a crafted value
+ * cannot disable a rule by forcing the error; {@see outcome()} reports it as
  * {@see RuleOutcome::FailClosed} so callers can distinguish it from a real match.
  */
 final readonly class RegexEvaluator implements DetailedOperatorEvaluatorInterface
 {
-    /** Maximum subject length (bytes) evaluated against the pattern; longer values are truncated to this length and the head is matched (ReDoS guard). */
-    public const MAX_SUBJECT_LENGTH = 8192;
-
     /** Cached regex pattern with delimiters, ready for preg_match(). */
     private string $delimitedPattern;
 
@@ -56,14 +56,6 @@ final readonly class RegexEvaluator implements DetailedOperatorEvaluatorInterfac
         }
 
         foreach ($values as $index => $value) {
-            if (strlen($value) > self::MAX_SUBJECT_LENGTH) {
-                // Byte truncation can split a trailing multi-byte UTF-8 sequence, which would make
-                // an otherwise-valid subject fail the /u match and be wrongly treated as a match.
-                // Drop the partial trailing sequence so a valid long input is not falsely blocked;
-                // a subject malformed before the boundary still fails closed below.
-                $value = $this->trimPartialTrailingUtf8(substr($value, 0, self::MAX_SUBJECT_LENGTH));
-            }
-
             $matchResult = @preg_match($this->delimitedPattern, $value, $matches);
             if ($matchResult === 1) {
                 return OperatorResult::matched($index, $this->positionalCaptures($matches));
@@ -96,20 +88,6 @@ final readonly class RegexEvaluator implements DetailedOperatorEvaluatorInterfac
         }
 
         return $captures;
-    }
-
-    /**
-     * Drop an incomplete trailing UTF-8 sequence left by byte truncation. A UTF-8 character is at
-     * most 4 bytes, so at most 3 trailing bytes can form a partial sequence; a subject that stays
-     * invalid after trimming is malformed before the boundary and is left to fail closed.
-     */
-    private function trimPartialTrailingUtf8(string $value): string
-    {
-        for ($dropped = 0; $dropped < 3 && $value !== '' && @preg_match('//u', $value) !== 1; ++$dropped) {
-            $value = substr($value, 0, -1);
-        }
-
-        return $value;
     }
 
     /**
