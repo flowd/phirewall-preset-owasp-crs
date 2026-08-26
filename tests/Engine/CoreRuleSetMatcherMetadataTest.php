@@ -7,6 +7,7 @@ namespace Flowd\PhirewallPresetOwaspCrs\Tests\Engine;
 use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRule;
 use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSet;
 use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSetMatcher;
+use Flowd\PhirewallPresetOwaspCrs\Engine\LogDataExpander;
 use Flowd\PhirewallPresetOwaspCrs\Engine\SecRuleLoader;
 use Nyholm\Psr7\ServerRequest;
 use PHPUnit\Framework\TestCase;
@@ -133,5 +134,23 @@ final class CoreRuleSetMatcherMetadataTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
 
         new CoreRuleSetMatcher(new CoreRuleSet(), anomalyThreshold: 0);
+    }
+
+    public function testSensitiveHeaderValueIsRedactedInLogDataMetadata(): void
+    {
+        $rulesText = "SecRule REQUEST_HEADERS:Authorization \"@rx (?i)(bearer)\" \"id:400007,phase:1,deny,msg:'Suspicious auth',logdata:'Matched Data: %{TX.0} found within %{MATCHED_VAR_NAME}: %{MATCHED_VAR}',severity:'CRITICAL'\"";
+        $coreRuleSetMatcher = new CoreRuleSetMatcher(SecRuleLoader::fromString($rulesText));
+
+        $secretToken = 'Bearer super-secret-token';
+        $request = (new ServerRequest('GET', '/'))->withHeader('Authorization', $secretToken);
+        $matchResult = $coreRuleSetMatcher->match($request);
+
+        $this->assertTrue($matchResult->isMatch());
+        $logData = $matchResult->metadata()['owasp_log_data'] ?? null;
+        $this->assertIsString($logData);
+        // Same source as the PSR-3 log_data: redacting once in LogDataExpander covers both sinks.
+        $this->assertStringNotContainsString('super-secret-token', $logData);
+        $this->assertStringContainsString('REQUEST_HEADERS:Authorization', $logData);
+        $this->assertStringContainsString(LogDataExpander::REDACTED_PLACEHOLDER, $logData);
     }
 }
