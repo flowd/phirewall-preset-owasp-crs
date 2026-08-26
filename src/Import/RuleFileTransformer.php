@@ -74,6 +74,10 @@ final readonly class RuleFileTransformer
                 continue;
             }
 
+            // Retarget REQUEST_URI_RAW before parsing so the rule is recognised as inspecting a
+            // supported target rather than dropped as unsupported.
+            $logicalLine = $this->remapRawRequestUriTarget($logicalLine);
+
             $coreRule = $this->secRuleParser->parseLine($logicalLine);
             if (!$coreRule instanceof CoreRule) {
                 $droppedRuleCounts[self::REASON_UNPARSEABLE] = ($droppedRuleCounts[self::REASON_UNPARSEABLE] ?? 0) + 1;
@@ -108,6 +112,11 @@ final readonly class RuleFileTransformer
             $severityKey = $coreRule->severity ?? 'NONE';
             $keptRuleCountsBySeverity[$severityKey] = ($keptRuleCountsBySeverity[$severityKey] ?? 0) + 1;
 
+            // The engine does not apply t:lowercase, so an @rx pattern relying on it stays
+            // case-sensitive here and mixed case evades it; a leading inline (?i) restores the
+            // intended case-insensitive match.
+            $logicalLine = $this->injectCaseInsensitiveFlagWhenLowercased($logicalLine);
+
             $ruleLinesByParanoiaLevel[$coreRule->paranoiaLevel][] = $logicalLine;
         }
 
@@ -136,6 +145,76 @@ final readonly class RuleFileTransformer
         }
 
         return false;
+    }
+
+    /**
+     * Rewrite the variable list so REQUEST_URI_RAW targets the supported REQUEST_URI.
+     *
+     * The engine has no REQUEST_URI_RAW collector, so a rule targeting it inspects nothing there
+     * and URL-path payloads (for example /a/../../etc/passwd) slip past rules such as 930100/930110.
+     * REQUEST_URI carries the same request path, so the substitution restores that coverage. Only
+     * the variable list (everything before the first quoted segment) is rewritten, leaving any
+     * literal occurrence inside the operator pattern or actions untouched.
+     */
+    private function remapRawRequestUriTarget(string $logicalLine): string
+    {
+        $operatorQuotePosition = strpos($logicalLine, '"');
+        $variablesSegment = $operatorQuotePosition === false
+            ? $logicalLine
+            : substr($logicalLine, 0, $operatorQuotePosition);
+        $remainder = $operatorQuotePosition === false
+            ? ''
+            : substr($logicalLine, $operatorQuotePosition);
+
+        $remappedVariables = preg_replace('/\bREQUEST_URI_RAW\b/', 'REQUEST_URI', $variablesSegment);
+
+        return ($remappedVariables ?? $variablesSegment) . $remainder;
+    }
+
+    /**
+     * Prepend an inline (?i) to an @rx pattern when the source rule carries t:lowercase.
+     *
+     * ModSecurity lowercases the subject before matching for such rules; the engine does not run
+     * that transformation, so without the inline flag the pattern is case-sensitive and mixed case
+     * evades it (notably the Java gadget names in 944240/944250). The flag is only added when the
+     * operator is @rx and the pattern does not already open with a case-insensitive modifier.
+     */
+    private function injectCaseInsensitiveFlagWhenLowercased(string $logicalLine): string
+    {
+        if (preg_match('/(?:^|[^a-zA-Z])t:lowercase(?![a-zA-Z])/i', $logicalLine) !== 1) {
+            return $logicalLine;
+        }
+
+        $operatorQuotePosition = strpos($logicalLine, '"');
+        if ($operatorQuotePosition === false) {
+            return $logicalLine;
+        }
+
+        $afterQuote = substr($logicalLine, $operatorQuotePosition + 1);
+        if (preg_match('/^@rx\s+/i', $afterQuote, $operatorPrefix) !== 1) {
+            return $logicalLine;
+        }
+
+        $patternStart = $operatorQuotePosition + 1 + strlen($operatorPrefix[0]);
+        $pattern = substr($logicalLine, $patternStart);
+        if ($this->patternOpensCaseInsensitive($pattern)) {
+            return $logicalLine;
+        }
+
+        return substr($logicalLine, 0, $patternStart) . '(?i)' . $pattern;
+    }
+
+    /**
+     * Whether a PCRE pattern begins with an inline modifier group that already sets the
+     * case-insensitive flag, for example "(?i)" or "(?im:...)".
+     */
+    private function patternOpensCaseInsensitive(string $pattern): bool
+    {
+        if (preg_match('/^\(\?([a-zA-Z]*)[:)]/', $pattern, $modifierMatch) !== 1) {
+            return false;
+        }
+
+        return str_contains($modifierMatch[1], 'i');
     }
 
     /**

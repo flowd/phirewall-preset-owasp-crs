@@ -242,12 +242,24 @@ final class VariableCollectorTest extends TestCase
         $this->assertContains('content-type', $lowered);
     }
 
-    public function testRequestFilenameCollectorReturnsBasename(): void
+    public function testRequestFilenameCollectorReturnsFullPath(): void
     {
         $collector = new RequestFilenameCollector();
         $request = new ServerRequest('GET', '/uploads/photo.jpg');
 
-        $this->assertSame([['name' => null, 'value' => 'photo.jpg']], $collector->collect($request));
+        // Full path, not basename ('photo.jpg'): a basename can never contain a slash, so
+        // slash-bearing @pmFromFile tokens (.git/, /auth.json) could never match otherwise.
+        $this->assertSame([['name' => null, 'value' => '/uploads/photo.jpg']], $collector->collect($request));
+    }
+
+    public function testRequestFilenameCollectorKeepsDirectorySegmentsSoSlashTokensCanMatch(): void
+    {
+        $collector = new RequestFilenameCollector();
+
+        // /.git/config: basename would be 'config' (no slash token); the full path exposes '.git/'.
+        $this->assertSame([['name' => null, 'value' => '/.git/config']], $collector->collect(new ServerRequest('GET', '/.git/config')));
+        // Query string is excluded (REQUEST_FILENAME is the path only).
+        $this->assertSame([['name' => null, 'value' => '/app/index.php']], $collector->collect(new ServerRequest('GET', '/app/index.php?a=1')));
     }
 
     public function testRequestFilenameCollectorReturnsEmptyForEmptyPath(): void

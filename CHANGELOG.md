@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MatchResult` metadata now carries `owasp_anomaly_score`, `owasp_anomaly_threshold`, `owasp_rule_ids`, `owasp_log_data` and `owasp_fail_closed` alongside `owasp_rule_id`/`msg`; blocked responses gain the `X-Phirewall-Owasp-Score` diagnostic header, and `X-Phirewall-Owasp-Rule` may list multiple ids (capped at 10, then `,+N`).
 - The compiled-data cache schema version was bumped (v2); existing artifacts rebuild automatically.
 
+### Fixed
+
+- **`REQUEST_FILENAME` collects the full request path instead of only the basename.** It previously returned `basename($path)`, which is the distinct ModSecurity `REQUEST_BASENAME`: a basename can never contain a slash, so slash-bearing `@pmFromFile` tokens (directory prefixes like `.git/`, leading-slash secret-file names like `/auth.json`) could never match, silently disabling most of the restricted-files rules (930130/930140). Requests to `/.git/config`, `/.env`, `/app/etc/env.php` and similar are now matched. Effective immediately against the bundled rules.
+- **`REQUEST_URI_RAW` targets are remapped to the supported `REQUEST_URI` at import.** Rules such as 930100/930110 target the raw URI, which the engine did not collect, so URL-path traversal (`/app/../../../etc/passwd`) slipped while the same payload in a query argument blocked. Takes effect after rerunning `bin/crs-import`.
+- **`t:lowercase` `@rx` rules are made case-insensitive at import.** The engine does not apply the `t:lowercase` transformation, so nine `@rx` rules relying on it (including the Java gadget names in 944240/944250) were case-sensitive and evadable with mixed case; an inline `(?i)` is now injected into such patterns at import. Takes effect after rerunning `bin/crs-import`.
+
 ## 0.4.1 - 2026-08-20
 
 ### Changed
