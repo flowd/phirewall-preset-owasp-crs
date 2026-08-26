@@ -16,7 +16,6 @@ require __DIR__ . '/../vendor/autoload.php';
 use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRule;
 use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSet;
 use Flowd\PhirewallPresetOwaspCrs\Engine\SecRuleLoader;
-use Flowd\PhirewallPresetOwaspCrs\Import\LogicalLineSplitter;
 use Nyholm\Psr7\ServerRequest;
 
 mt_srand(1337); // deterministic output across runs
@@ -424,7 +423,7 @@ foreach (glob($rulesDir . '/*.data') ?: [] as $dataFile) {
 /**
  * Build a request that places $payload into the variable the rule inspects.
  *
- * @return array{0: string, 1: \Psr\Http\Message\ServerRequestInterface}
+ * @return array{0: string, 1: Psr\Http\Message\ServerRequestInterface}
  */
 function requestFor(string $vector, string $payload): array
 {
@@ -448,9 +447,15 @@ function requestFor(string $vector, string $payload): array
             return [$vector, $base->withHeader('Referer', $payload)];
         case 'header_ua':
             return [$vector, $base->withHeader('User-Agent', $payload)];
+        case 'header_content_type':
+            return [$vector, $base->withHeader('Content-Type', $payload)];
         case 'method':
             return [$vector, (new ServerRequest($payload !== '' ? $payload : 'GET', 'https://example.test/'))];
         default:
+            if (str_starts_with($vector, 'header:')) {
+                return [$vector, $base->withHeader(substr($vector, strlen('header:')), $payload)];
+            }
+
             return [$vector, $base];
     }
 }
@@ -486,6 +491,15 @@ function vectorsFor(CoreRule $rule): array
     if ($has('REQUEST_HEADERS')) {
         $vectors[] = 'header_referer';
         $vectors[] = 'header_ua';
+        $vectors[] = 'header_content_type';
+    }
+
+    // A named header selector gets a vector delivering the payload in exactly
+    // that header (upload-filename rules, Content-Type checks, ...).
+    foreach ($variables as $variable) {
+        if (str_starts_with($variable, 'REQUEST_HEADERS:') && !str_contains($variable, '/')) {
+            $vectors[] = 'header:' . substr($variable, strlen('REQUEST_HEADERS:'));
+        }
     }
     if ($has('REQUEST_METHOD')) {
         $vectors[] = 'method';
@@ -529,7 +543,8 @@ function candidatePayloads(CoreRule $rule, RegexSampler $sampler, array $dataPhr
                 $samples[$sample] = true;
             }
         }
-        return array_keys($samples);
+        // array_keys() int-casts numeric string samples; the payloads must stay strings.
+        return array_map('strval', array_keys($samples));
     }
 
     return [];
@@ -608,7 +623,7 @@ foreach ($ruleFiles as $ruleFile) {
         foreach ($candidates as [$vector, $payload]) {
             try {
                 [$usedVector, $request] = requestFor($vector, $payload);
-            } catch (\InvalidArgumentException) {
+            } catch (InvalidArgumentException) {
                 continue; // payload not placeable in this vector (e.g. control chars in a header)
             }
 
@@ -651,7 +666,7 @@ $export = "<?php\n\ndeclare(strict_types=1);\n\n"
     . " * }\n"
     . " */\n\n"
     . "return [\n"
-    . sprintf("    'crsVersion' => %s,\n", var_export(\Flowd\PhirewallPresetOwaspCrs\Manifest::read($rulesDir)->crsVersion, true))
+    . sprintf("    'crsVersion' => %s,\n", var_export(Flowd\PhirewallPresetOwaspCrs\Manifest::read($rulesDir)->crsVersion, true))
     . "    'payloads' => [\n";
 
 foreach ($fixtures as $id => $entry) {
