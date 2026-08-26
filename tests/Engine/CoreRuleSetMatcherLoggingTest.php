@@ -98,6 +98,26 @@ final class CoreRuleSetMatcherLoggingTest extends TestCase
         $this->assertSame('ARGS:utm_content', $logger->records[0]['context']['matched_variable']);
     }
 
+    public function testAttackerControlledContextValuesAreSanitized(): void
+    {
+        $logger = $this->loggerSpy();
+        $matcher = new CoreRuleSetMatcher(new CoreRuleSet([$this->sqliRule()]), logger: $logger);
+
+        $forgingName = "q\r\n2099-01-01 CRITICAL forged-line";
+        $request = (new ServerRequest("GET\r\ninjected", "/search\r\ninjected"))
+            ->withQueryParams([$forgingName => '1 union select 2']);
+        $this->assertTrue($matcher->match($request)->isMatch());
+
+        $context = $logger->records[0]['context'];
+        $this->assertIsString($context['matched_variable']);
+        $this->assertStringNotContainsString("\r", $context['matched_variable']);
+        $this->assertStringNotContainsString("\n", $context['matched_variable']);
+        $this->assertIsString($context['path']);
+        $this->assertStringNotContainsString("\n", $context['path']);
+        $this->assertIsString($context['method']);
+        $this->assertStringNotContainsString("\n", $context['method']);
+    }
+
     public function testCleanRequestLogsNothing(): void
     {
         $logger = $this->loggerSpy();

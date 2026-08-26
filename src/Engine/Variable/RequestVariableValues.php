@@ -35,7 +35,7 @@ final class RequestVariableValues
     /**
      * Collected entries cache keyed by variable name.
      *
-     * @var array<string, list<array{name: ?string, value: string}>>
+     * @var array<string, list<array{name: ?string, value: string, isNameEntry?: bool}>>
      */
     private array $entriesByVariableName = [];
 
@@ -99,7 +99,7 @@ final class RequestVariableValues
      * manipulation: a request padded past the cap fails closed regardless of how many of
      * its entries a rule would later exclude.
      *
-     * @return list<array{name: ?string, value: string}>
+     * @return list<array{name: ?string, value: string, isNameEntry?: bool}>
      */
     public function entriesFor(string $variableName): array
     {

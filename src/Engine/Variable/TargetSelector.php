@@ -52,6 +52,24 @@ final readonly class TargetSelector
     }
 
     /**
+     * Parse a public-API exclusion selector; the `!` prefix is rejected because
+     * exclusions are negations by definition.
+     *
+     * @throws \InvalidArgumentException When the selector form is unsupported or negated.
+     */
+    public static function parseExclusion(string $selector): self
+    {
+        $parsed = self::parse($selector);
+        if ($parsed->negated) {
+            throw new \InvalidArgumentException(
+                sprintf('Exclusion selector "%s" must not carry a "!" prefix; exclusions are implicitly negated.', $selector),
+            );
+        }
+
+        return $parsed;
+    }
+
+    /**
      * Lenient variant for selectors read from rule text: unsupported forms yield
      * null (the caller ignores them) instead of throwing.
      */

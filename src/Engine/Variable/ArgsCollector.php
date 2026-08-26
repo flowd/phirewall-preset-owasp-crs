@@ -22,10 +22,10 @@ use Psr\Http\Message\ServerRequestInterface;
  */
 final readonly class ArgsCollector implements VariableCollectorInterface
 {
-    /** @return list<array{name: ?string, value: string}> */
+    /** @return list<array{name: ?string, value: string, isNameEntry?: bool}> */
     public function collect(ServerRequestInterface $serverRequest): array
     {
-        /** @var list<array{name: ?string, value: string}> $collected */
+        /** @var list<array{name: ?string, value: string, isNameEntry?: bool}> $collected */
         $collected = [];
 
         $this->collectFrom($serverRequest->getQueryParams(), $collected);
@@ -41,10 +41,12 @@ final readonly class ArgsCollector implements VariableCollectorInterface
     /**
      * Append every scalar leaf value and its flattened bracketed name from a parameter map.
      * Both entries carry the bracketed parameter name, so a name-based exclusion removes
-     * a parameter's value and its injected name entry together.
+     * a parameter's value and its injected name entry together. The injected name entry
+     * is flagged so named selectors (`ARGS:redirect` targets the value, not the literal
+     * name) and `!ARGS_NAMES:...` rule-text exclusions can address it separately.
      *
      * @param array<array-key, mixed> $parameters
-     * @param list<array{name: ?string, value: string}> $collected
+     * @param list<array{name: ?string, value: string, isNameEntry?: bool}> $collected
      * @param string $namePrefix Bracketed name accumulated while descending (e.g. "foo[bar]")
      */
     private function collectFrom(array $parameters, array &$collected, string $namePrefix = ''): void
@@ -64,7 +66,7 @@ final readonly class ArgsCollector implements VariableCollectorInterface
                 $collected[] = ['name' => $name, 'value' => (string) $value];
             }
 
-            $collected[] = ['name' => $name, 'value' => $name];
+            $collected[] = ['name' => $name, 'value' => $name, 'isNameEntry' => true];
         }
     }
 }

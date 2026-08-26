@@ -86,6 +86,20 @@ final class CoreRuleSetMatcherLazyTest extends TestCase
         $matcher->excludeTarget('QUERY_STRING:utm_source');
     }
 
+    public function testQueuedNegatedSelectorFailsEagerly(): void
+    {
+        // A negated exclusion must be rejected at registration, not on the first
+        // request: on the lazy path a first-request throw would be swallowed by a
+        // fail-open middleware and silently disable the whole rule set.
+        [$root] = $this->rulesDirectory();
+        $matcher = CoreRuleSetMatcher::fromRuleFiles(ParanoiaLevel::Level1, $root->url() . '/rules');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('implicitly negated');
+
+        $matcher->excludeTarget('!ARGS:sessionid');
+    }
+
     public function testTogglesBeforeFirstUseAreQueuedAndApplied(): void
     {
         [$root] = $this->rulesDirectory();

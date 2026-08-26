@@ -17,7 +17,7 @@ use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\RequestVariableValues;
  */
 final class RuleTargetSession
 {
-    /** @var array<string, list<array{name: ?string, value: string}>> */
+    /** @var array<string, list<array{name: ?string, value: string, isNameEntry?: bool}>> */
     private array $globalCache = [];
 
     public function __construct(
@@ -29,7 +29,7 @@ final class RuleTargetSession
     /**
      * The entries a rule sees for one of its target variables.
      *
-     * @return list<array{name: ?string, value: string}>
+     * @return list<array{name: ?string, value: string, isNameEntry?: bool}>
      */
     public function entriesFor(CoreRule $coreRule, string $variable): array
     {

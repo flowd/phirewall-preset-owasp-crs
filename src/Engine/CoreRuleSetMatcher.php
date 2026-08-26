@@ -171,7 +171,7 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
      */
     public function excludeTarget(string $selector): self
     {
-        TargetSelector::parse($selector); // validate eagerly, even when queued
+        TargetSelector::parseExclusion($selector); // validate eagerly, even when queued
         $this->configure(static function (CoreRuleSet $coreRuleSet) use ($selector): void {
             $coreRuleSet->excludeTarget($selector);
         });
@@ -186,7 +186,7 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
      */
     public function excludeTargetById(int $ruleId, string $selector): self
     {
-        TargetSelector::parse($selector);
+        TargetSelector::parseExclusion($selector); // validate eagerly, even when queued
         $this->configure(static function (CoreRuleSet $coreRuleSet) use ($ruleId, $selector): void {
             $coreRuleSet->excludeTargetById($ruleId, $selector);
         });
@@ -201,7 +201,7 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
      */
     public function excludeTargetByTag(string $tag, string $selector): self
     {
-        TargetSelector::parse($selector);
+        TargetSelector::parseExclusion($selector); // validate eagerly, even when queued
         $this->configure(static function (CoreRuleSet $coreRuleSet) use ($tag, $selector): void {
             $coreRuleSet->excludeTargetByTag($tag, $selector);
         });
@@ -275,8 +275,12 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
             return;
         }
 
-        $method = $serverRequest->getMethod();
-        $path = $serverRequest->getUri()->getPath();
+        // method, path and matched_variable all carry attacker-controlled input
+        // (request line, URI, member name): sanitize each like log_data (control
+        // characters, length bound) so a crafted request cannot inject or inflate
+        // log lines.
+        $method = LogDataExpander::sanitize($serverRequest->getMethod());
+        $path = LogDataExpander::sanitize($serverRequest->getUri()->getPath(), LogDataExpander::MAX_RESULT_LENGTH);
 
         foreach ($ruleSetEvaluation->ruleMatches as $ruleMatch) {
             $this->logger->info('OWASP CRS rule {rule_id} matched', [
@@ -284,7 +288,9 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
                 'severity' => $ruleMatch->severity,
                 'anomaly_score' => $ruleMatch->anomalyScore,
                 'paranoia_level' => $ruleMatch->paranoiaLevel,
-                'matched_variable' => $ruleMatch->matchedVariableName,
+                'matched_variable' => $ruleMatch->matchedVariableName !== null
+                    ? LogDataExpander::sanitize($ruleMatch->matchedVariableName)
+                    : null,
                 'log_data' => $ruleMatch->logData,
                 'msg' => $ruleMatch->message,
                 'fail_closed' => $ruleMatch->failClosed,

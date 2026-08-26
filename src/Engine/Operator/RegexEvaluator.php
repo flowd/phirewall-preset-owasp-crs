@@ -24,7 +24,7 @@ namespace Flowd\PhirewallPresetOwaspCrs\Engine\Operator;
  */
 final readonly class RegexEvaluator implements DetailedOperatorEvaluatorInterface
 {
-    /** Maximum subject length (bytes) evaluated against the pattern; longer values are skipped (ReDoS guard). */
+    /** Maximum subject length (bytes) evaluated against the pattern; longer values are truncated to this length and the head is matched (ReDoS guard). */
     public const MAX_SUBJECT_LENGTH = 8192;
 
     /** Cached regex pattern with delimiters, ready for preg_match(). */

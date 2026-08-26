@@ -39,7 +39,7 @@ final class RequestVariableValuesTest extends TestCase
 
         $this->assertSame([
             ['name' => 'utm_source', 'value' => 'facebook'],
-            ['name' => 'utm_source', 'value' => 'utm_source'],
+            ['name' => 'utm_source', 'value' => 'utm_source', 'isNameEntry' => true],
         ], $entries);
         $this->assertSame(['facebook', 'utm_source'], $values);
         $this->assertSame(1, $request->queryParamReads, 'valuesFor() must reuse the entries memo');

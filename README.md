@@ -72,7 +72,7 @@ use Flowd\Phirewall\Config\Rule\BlocklistRule;
 use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSetMatcher;
 
 $coreRuleSet = Presets::coreRuleSet(ParanoiaLevel::Level2);
-$coreRuleSet->disable(942100);
+$coreRuleSet->disable(942430);
 $config->blocklists->addRule(new BlocklistRule('my-crs-rule', new CoreRuleSetMatcher($coreRuleSet)));
 ```
 
@@ -187,11 +187,15 @@ say) before scores ever accumulate to a block, then add a target exclusion.
 Blocked requests additionally log a `warning` with the total score, threshold
 and all matched rule ids.
 
-The log context carries `rule_id`, `severity`, `anomaly_score`, `paranoia_level`,
-`matched_variable` (e.g. `ARGS:utm_content`), `msg`, `method`, `path` and
-`log_data` - the rule's CRS `logdata:` template expanded with the matched data
-(`%{TX.0}`, `%{MATCHED_VAR_NAME}`, `%{MATCHED_VAR}`), sanitized (control
-characters stripped) and length-bounded before it reaches the log line.
+The per-match log context carries `rule_id`, `severity`, `anomaly_score`,
+`paranoia_level`, `matched_variable` (e.g. `ARGS:utm_content`), `msg`,
+`fail_closed`, `method`, `path` and `log_data` - the rule's CRS `logdata:`
+template expanded with the matched data (`%{TX.0}`, `%{MATCHED_VAR_NAME}`,
+`%{MATCHED_VAR}`); the warning context carries `total_score`,
+`anomaly_threshold`, `rule_ids`, `fail_closed`, `method` and `path`.
+Attacker-controlled context values (`matched_variable`, `path`, `log_data`)
+are sanitized (control characters stripped) and length-bounded before they
+reach the log line.
 
 ### Using the SecRule engine directly
 
@@ -246,7 +250,7 @@ are queued and applied once the rules are loaded:
 
 ```php
 $matcher = CoreRuleSetMatcher::fromRuleFiles(ParanoiaLevel::Level1);
-$matcher->disable(942340);
+$matcher->disable(941110);
 
 $config->blocklists->addRule(new BlocklistRule('owasp', $matcher));
 ```
@@ -281,8 +285,9 @@ Further engine differences to be aware of:
   negated selectors of supported variables ARE honored: `REQUEST_HEADERS:User-Agent`
   inspects only that header, `!REQUEST_COOKIES:/__utm/` excludes matching cookies.
 
-`resources/rules/manifest.json` records the imported release, per-level and
-per-severity rule counts and how many rules were dropped per reason.
+`resources/rules/manifest.json` records the imported release, per-level rule
+counts and how many rules were dropped per reason; imports since 0.5 also
+record per-severity rule counts (`ruleCountsBySeverity`).
 
 This package hardens a PHP application but is **not** a replacement for a full WAF
 deployment of the CRS.

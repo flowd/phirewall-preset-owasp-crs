@@ -33,8 +33,8 @@ final readonly class RuleTargetFilter
      * Filter and transform the entries of one collection variable. When nothing
      * applies to the variable the input array is returned as-is (no copy).
      *
-     * @param list<array{name: ?string, value: string}> $entries
-     * @return list<array{name: ?string, value: string}>
+     * @param list<array{name: ?string, value: string, isNameEntry?: bool}> $entries
+     * @return list<array{name: ?string, value: string, isNameEntry?: bool}>
      */
     public function apply(string $variable, array $entries): array
     {

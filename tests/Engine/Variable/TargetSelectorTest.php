@@ -99,6 +99,22 @@ final class TargetSelectorTest extends TestCase
         $this->assertNull(TargetSelector::tryParse($selector));
     }
 
+    public function testParseExclusionRejectsNegatedSelectors(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('implicitly negated');
+
+        TargetSelector::parseExclusion('!ARGS:/^utm_/');
+    }
+
+    public function testParseExclusionAcceptsRegularSelectors(): void
+    {
+        $selector = TargetSelector::parseExclusion('ARGS:/^utm_/');
+
+        $this->assertSame('ARGS', $selector->variable);
+        $this->assertFalse($selector->negated);
+    }
+
     public function testParseMentionsAlternativesForNamedSelectorOnUnnamedVariable(): void
     {
         try {

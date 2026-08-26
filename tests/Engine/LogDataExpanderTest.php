@@ -70,6 +70,15 @@ final class LogDataExpanderTest extends TestCase
         $this->assertMatchesRegularExpression('//u', $expanded, 'Expanded logdata must stay valid UTF-8');
     }
 
+    public function testSanitizeStripsControlCharactersAndBoundsLength(): void
+    {
+        $sanitized = LogDataExpander::sanitize("ARGS:q\r\nforged" . str_repeat('x', 300));
+
+        $this->assertStringNotContainsString("\n", $sanitized);
+        $this->assertStringStartsWith('ARGS:q  forged', $sanitized);
+        $this->assertSame(LogDataExpander::MAX_MATCHED_VALUE_LENGTH, strlen($sanitized));
+    }
+
     public function testFailClosedResultExpandsWithoutValue(): void
     {
         $expanded = LogDataExpander::expand(

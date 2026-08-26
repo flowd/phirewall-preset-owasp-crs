@@ -246,20 +246,9 @@ final class CoreRuleSet
             : new CallableRequestValueManipulator($manipulator);
     }
 
-    /**
-     * Parse a public-API exclusion selector; the `!` prefix is rejected because
-     * exclusions are negations by definition.
-     */
     private function parseExclusionSelector(string $selector): TargetSelector
     {
-        $parsed = TargetSelector::parse($selector);
-        if ($parsed->negated) {
-            throw new \InvalidArgumentException(
-                sprintf('Exclusion selector "%s" must not carry a "!" prefix; exclusions are implicitly negated.', $selector),
-            );
-        }
-
-        return $parsed;
+        return TargetSelector::parseExclusion($selector);
     }
 
     /**

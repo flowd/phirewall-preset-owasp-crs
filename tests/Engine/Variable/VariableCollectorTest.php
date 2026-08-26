@@ -99,7 +99,7 @@ final class VariableCollectorTest extends TestCase
 
         $this->assertSame([
             ['name' => 'utm_source', 'value' => 'facebook'],
-            ['name' => 'utm_source', 'value' => 'utm_source'],
+            ['name' => 'utm_source', 'value' => 'utm_source', 'isNameEntry' => true],
         ], $collector->collect($request));
     }
 

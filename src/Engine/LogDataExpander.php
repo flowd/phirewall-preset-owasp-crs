@@ -31,9 +31,18 @@ final class LogDataExpander
             $template,
         ) ?? $template;
 
-        $sanitized = preg_replace('/[\x00-\x1F\x7F]/', ' ', $expanded) ?? '';
+        return self::sanitize($expanded, self::MAX_RESULT_LENGTH);
+    }
 
-        return self::truncate($sanitized, self::MAX_RESULT_LENGTH);
+    /**
+     * Make an attacker-controlled value safe for a log line: control characters
+     * (CR/LF/NUL etc.) become spaces and the result is length-bounded.
+     */
+    public static function sanitize(string $value, int $maxLength = self::MAX_MATCHED_VALUE_LENGTH): string
+    {
+        $stripped = preg_replace('/[\x00-\x1F\x7F]/', ' ', $value) ?? '';
+
+        return self::truncate($stripped, $maxLength);
     }
 
     private static function resolveMacro(string $macro, CoreRuleResult $coreRuleResult): string

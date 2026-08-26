@@ -285,6 +285,12 @@ final readonly class CoreRule
         $values = [];
         foreach ($this->targets as $target) {
             $exclusions = $this->textExclusions[$target->variable] ?? [];
+            // Injected name entries (the ARGS hardening entries carrying a parameter
+            // name as their value) are semantically members of the variable's _NAMES
+            // counterpart: a named selector such as ARGS:redirect targets the
+            // parameter's value and skips them, and !ARGS_NAMES:... rule-text
+            // exclusions suppress them.
+            $nameEntryExclusions = $this->textExclusions[$target->variable . '_NAMES'] ?? [];
             $entries = $ruleTargetSession instanceof RuleTargetSession
                 ? $ruleTargetSession->entriesFor($this, $target->variable)
                 : $requestVariableValues->entriesFor($target->variable);
@@ -297,9 +303,22 @@ final readonly class CoreRule
                     continue;
                 }
 
+                $isNameEntry = $entry['isNameEntry'] ?? false;
+                if ($isNameEntry && !$target->isBare()) {
+                    continue;
+                }
+
                 foreach ($exclusions as $exclusion) {
                     if ($exclusion->matchesName($entry['name'])) {
                         continue 2;
+                    }
+                }
+
+                if ($isNameEntry) {
+                    foreach ($nameEntryExclusions as $nameEntryExclusion) {
+                        if ($nameEntryExclusion->matchesName($entry['name'])) {
+                            continue 2;
+                        }
                     }
                 }
 
