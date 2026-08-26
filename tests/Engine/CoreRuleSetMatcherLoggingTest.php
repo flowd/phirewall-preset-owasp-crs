@@ -7,6 +7,7 @@ namespace Flowd\PhirewallPresetOwaspCrs\Tests\Engine;
 use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRule;
 use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSet;
 use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSetMatcher;
+use Flowd\PhirewallPresetOwaspCrs\Engine\LogDataExpander;
 use Nyholm\Psr7\ServerRequest;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
@@ -127,5 +128,39 @@ final class CoreRuleSetMatcherLoggingTest extends TestCase
         $this->assertFalse($matcher->match($request)->isMatch());
 
         $this->assertSame([], $logger->records);
+    }
+
+    public function testSensitiveCookieValueIsRedactedInTheLoggedLogData(): void
+    {
+        $cookieRule = new CoreRule(
+            942101,
+            ['REQUEST_COOKIES'],
+            '@rx',
+            '(?i)(union\s+select)',
+            [
+                'deny' => true,
+                'msg' => 'SQL Injection Attack',
+                'logdata' => 'Matched Data: %{TX.0} found within %{MATCHED_VAR_NAME}: %{MATCHED_VAR}',
+            ],
+            null,
+            5,
+            'CRITICAL',
+            1,
+        );
+
+        $logger = $this->loggerSpy();
+        $matcher = new CoreRuleSetMatcher(new CoreRuleSet([$cookieRule]), logger: $logger);
+
+        $secretCookieValue = '1 union select 2';
+        $request = (new ServerRequest('GET', '/'))->withCookieParams(['session' => $secretCookieValue]);
+        $this->assertTrue($matcher->match($request)->isMatch());
+
+        $context = $logger->records[0]['context'];
+        // The target name identifies the parameter for tuning; the value and capture are redacted.
+        $this->assertSame('REQUEST_COOKIES:session', $context['matched_variable']);
+        $this->assertIsString($context['log_data']);
+        $this->assertStringNotContainsString($secretCookieValue, $context['log_data']);
+        $this->assertStringNotContainsString('union select', $context['log_data']);
+        $this->assertStringContainsString(LogDataExpander::REDACTED_PLACEHOLDER, $context['log_data']);
     }
 }
