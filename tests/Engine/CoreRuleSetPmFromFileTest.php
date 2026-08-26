@@ -22,16 +22,17 @@ SeCrEt
 alpha, beta ,  gamma
 TXT;
         vfsStream::newFile('phrases.txt')->at($root)->setContent($content);
-        $file = $root->getChild('phrases.txt')->url();
 
-        $rulesText = 'SecRule REQUEST_URI "@pmFromFile ' . str_replace('"', '\\"', $file) . '" "id:730001,phase:2,deny,msg:\'PM file\'"';
-        $set = SecRuleLoader::fromString($rulesText);
+        // Relative operand resolved against the context folder, as the loader does for
+        // shipped rules; a raw stream-wrapper operand is rejected.
+        $rulesText = 'SecRule REQUEST_URI "@pmFromFile phrases.txt" "id:730001,phase:2,deny,msg:\'PM file\'"';
+        $set = SecRuleLoader::fromString($rulesText, $root->url());
         $this->assertContains(730001, $set->ids(), 'Rule id should be loaded');
         $rule = $set->getRule(730001);
         $this->assertNotNull($rule);
         $this->assertTrue($set->isEnabled(730001));
         $this->assertSame('@pmfromfile', strtolower($rule->operator));
-        $this->assertSame($file, $rule->operatorArgument);
+        $this->assertSame('phrases.txt', $rule->operatorArgument);
         $this->assertContains('REQUEST_URI', $rule->variables);
 
         // Matches any phrase (case-insensitive)
@@ -48,9 +49,9 @@ TXT;
 
     public function testPmFromFileMissingFileIsSafeNoMatch(): void
     {
-        vfsStream::setup('missing');
-        $rulesText = 'SecRule REQUEST_URI "@pmFromFile vfs://missing/nonexistent.txt" "id:730002,phase:2,deny"';
-        $coreRuleSet = SecRuleLoader::fromString($rulesText);
+        $root = vfsStream::setup('missing');
+        $rulesText = 'SecRule REQUEST_URI "@pmFromFile nonexistent.txt" "id:730002,phase:2,deny"';
+        $coreRuleSet = SecRuleLoader::fromString($rulesText, $root->url());
         $this->assertSame([], $coreRuleSet->evaluate(new ServerRequest('GET', '/anything'))->matchedRuleIds());
     }
 
@@ -64,10 +65,9 @@ TXT;
 
         $buf .= "beyond-cap\n";
         vfsStream::newFile('many.txt')->at($root)->setContent($buf);
-        $file = $root->getChild('many.txt')->url();
 
-        $rulesText = 'SecRule REQUEST_URI "@pmFromFile ' . str_replace('"', '\\"', $file) . '" "id:730003,phase:2,deny"';
-        $set = SecRuleLoader::fromString($rulesText);
+        $rulesText = 'SecRule REQUEST_URI "@pmFromFile many.txt" "id:730003,phase:2,deny"';
+        $set = SecRuleLoader::fromString($rulesText, $root->url());
 
         // Should match an early phrase (within cap)
         $this->assertSame([730003], $set->evaluate(new ServerRequest('GET', '/p10'))->matchedRuleIds());
@@ -75,14 +75,18 @@ TXT;
         $this->assertSame([], $set->evaluate(new ServerRequest('GET', '/beyond-cap'))->matchedRuleIds());
     }
 
-    public function testPmFromFileRejectsPathTraversal(): void
+    public function testPmFromFileRejectsPathTraversalByFailingClosed(): void
     {
+        // A traversal operand cannot be loaded; the rule fails closed (a deterministic
+        // block) instead of throwing out of the matcher and letting a fail-open policy
+        // silently disable every CRS rule for the request.
         $rulesText = 'SecRule ARGS "@pmFromFile ../../etc/passwd" "id:730004,phase:2,deny"';
         $coreRuleSet = SecRuleLoader::fromString($rulesText);
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Path traversal detected');
-        $coreRuleSet->evaluate(new ServerRequest('GET', '/?foo=test'));
+        $evaluation = $coreRuleSet->evaluate(new ServerRequest('GET', '/?foo=test'));
+
+        $this->assertTrue($evaluation->isBlocked());
+        $this->assertTrue($evaluation->failClosed);
     }
 
     public function testPmFromFileAllowsContextFolderWithDoubleDot(): void

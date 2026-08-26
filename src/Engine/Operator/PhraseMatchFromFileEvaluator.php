@@ -6,7 +6,14 @@ namespace Flowd\PhirewallPresetOwaspCrs\Engine\Operator;
 
 /**
  * Evaluates values against phrases loaded from a file (@pmFromFile operator).
- * Supports path traversal prevention and per-path caching.
+ *
+ * The operand is confined: directory traversal, absolute paths and stream-wrapper
+ * schemes (`file://`, `php://`, ...) are rejected unconditionally, so a null context
+ * folder cannot read an arbitrary or remote file, and with a context folder the
+ * resolved path must stay within it. An
+ * unsafe operand makes {@see outcome()} fail closed (a deterministic block via the
+ * anomaly engine) instead of throwing out of the matcher. A missing or unreadable
+ * file yields no phrases (no match). Results are cached per resolved path.
  */
 final readonly class PhraseMatchFromFileEvaluator implements DetailedOperatorEvaluatorInterface
 {
@@ -25,7 +32,18 @@ final readonly class PhraseMatchFromFileEvaluator implements DetailedOperatorEva
     /** @param list<string> $values */
     public function outcome(array $values): OperatorResult
     {
-        return PhraseMatchEvaluator::firstMatch($values, $this->loadPhrases());
+        try {
+            $phrases = $this->loadPhrases();
+        } catch (\RuntimeException) {
+            // An unsafe or unresolvable operand (traversal, absolute path, escaped
+            // context) cannot be loaded. Fail closed so the rule blocks deterministically
+            // through the anomaly engine, rather than throwing out of match(): an uncaught
+            // throw aborts the whole matcher and, under the default fail-open policy,
+            // silently disables every CRS rule for the request.
+            return OperatorResult::failClosed();
+        }
+
+        return PhraseMatchEvaluator::firstMatch($values, $phrases);
     }
 
     /**
@@ -43,15 +61,20 @@ final readonly class PhraseMatchFromFileEvaluator implements DetailedOperatorEva
             throw new \RuntimeException('Path traversal detected in @pmFromFile operand.');
         }
 
+        // Reject absolute operands and stream-wrapper / URL-scheme operands
+        // unconditionally. Without a context folder either would otherwise be read
+        // directly (arbitrary-file read via '/etc/passwd' or 'file:///etc/passwd',
+        // or a remote/php:// wrapper); with one, the operand must stay a plain path
+        // relative to that folder.
+        if ($this->isAbsolutePath($this->filePath) || $this->hasStreamWrapperScheme($this->filePath)) {
+            throw new \RuntimeException('Absolute path or stream wrapper not permitted in @pmFromFile operand.');
+        }
+
         $path = $this->filePath;
         if ($this->contextFolder !== null) {
-            // When the loader provides a context folder, the operand is treated
-            // as relative to it. Reject absolute paths and any post-resolve
-            // location that escapes the context folder (e.g. via symlinks).
-            if ($this->isAbsolutePath($this->filePath)) {
-                throw new \RuntimeException('Absolute path not permitted in @pmFromFile operand when a context folder is configured.');
-            }
-
+            // When the loader provides a context folder, the operand is treated as
+            // relative to it and confined; reject any post-resolve location that
+            // escapes the context folder (e.g. via symlinks).
             $path = rtrim($this->contextFolder, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR .
                 ltrim($this->filePath, DIRECTORY_SEPARATOR);
 
@@ -134,6 +157,17 @@ final readonly class PhraseMatchFromFileEvaluator implements DetailedOperatorEva
         }
 
         return preg_match('#^[A-Za-z]:[\\\\/]#', $path) === 1;
+    }
+
+    /**
+     * Detect a URL/stream-wrapper scheme prefix (`file://`, `php://`, `http://`,
+     * `vfs://`, ...). Such an operand must never be read directly: with no context
+     * folder it bypasses the relative-path confinement and would read an arbitrary
+     * local or remote resource.
+     */
+    private function hasStreamWrapperScheme(string $path): bool
+    {
+        return preg_match('#^[A-Za-z][A-Za-z0-9+.\-]*://#', $path) === 1;
     }
 
     /**

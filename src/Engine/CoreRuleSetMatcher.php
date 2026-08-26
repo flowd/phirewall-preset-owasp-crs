@@ -7,6 +7,7 @@ namespace Flowd\PhirewallPresetOwaspCrs\Engine;
 use Flowd\Phirewall\Config\MatchResult;
 use Flowd\Phirewall\Config\RequestMatcherInterface;
 use Flowd\Phirewall\Matchers\CompiledDataCacheAware;
+use Flowd\Phirewall\Matchers\FailOpenAware;
 use Flowd\Phirewall\Support\CompiledDataCache;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\RequestValueManipulatorInterface;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\TargetSelector;
@@ -36,7 +37,7 @@ use Psr\Log\LoggerInterface;
  * sub-threshold entries are the tuning signal: they surface false-positive
  * patterns (e.g. marketing parameters) before scores ever accumulate to a block.
  */
-final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataCacheAware
+final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataCacheAware, FailOpenAware
 {
     public const DEFAULT_ANOMALY_THRESHOLD = CoreRuleSet::DEFAULT_ANOMALY_THRESHOLD;
 
@@ -52,6 +53,9 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
     private const MAX_RULE_IDS_IN_HEADER = 10;
 
     private ?CompiledDataCache $compiledDataCache = null;
+
+    /** Fail-open default, matching {@see \Flowd\Phirewall\Config::isFailOpen()}. */
+    private bool $failOpen = true;
 
     private ParanoiaLevel $paranoiaLevel = ParanoiaLevel::Level1;
 
@@ -102,10 +106,38 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
         $this->compiledDataCache = $compiledDataCache;
     }
 
+    public function useFailOpen(bool $failOpen): void
+    {
+        $this->failOpen = $failOpen;
+    }
+
     public function match(ServerRequestInterface $serverRequest): MatchResult
     {
         $coreRuleSet = $this->coreRuleSet();
-        $evaluation = $coreRuleSet->evaluate($serverRequest, $this->anomalyThreshold);
+
+        try {
+            $evaluation = $coreRuleSet->evaluate($serverRequest, $this->anomalyThreshold);
+        } catch (\Throwable $throwable) {
+            // An engine-internal fault at evaluation time (e.g. a manipulator throwing).
+            // Honor the deployment's failure policy: fail-open rethrows so the core's
+            // Config/Middleware policy and its FirewallError event still govern; fail-closed
+            // blocks here so the fault cannot silently disable protection for the request.
+            if ($this->failOpen) {
+                throw $throwable;
+            }
+
+            $this->logger?->warning('OWASP CRS evaluation failed; blocking (fail-closed)', [
+                'error' => LogDataExpander::sanitize($throwable->getMessage(), LogDataExpander::MAX_RESULT_LENGTH),
+                'method' => LogDataExpander::sanitize($serverRequest->getMethod()),
+                'path' => LogDataExpander::sanitize($serverRequest->getUri()->getPath(), LogDataExpander::MAX_RESULT_LENGTH),
+            ]);
+
+            return MatchResult::matched('owasp', [
+                'owasp_anomaly_threshold' => $this->anomalyThreshold,
+                'owasp_fail_closed' => true,
+            ]);
+        }
+
         $this->logEvaluation($serverRequest, $evaluation);
 
         $firstMatch = $evaluation->firstMatch();
