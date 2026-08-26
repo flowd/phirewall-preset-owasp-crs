@@ -132,6 +132,86 @@ final class RuleFileTransformerTest extends TestCase
         );
     }
 
+    public function testRemapsRequestUriRawToTheSupportedRequestUriTarget(): void
+    {
+        $fileTransformation = $this->transformer()->transform(
+            'SecRule REQUEST_URI_RAW|ARGS "@rx \.\./" "id:930111,phase:1,block"',
+        );
+
+        $storedLine = $fileTransformation->ruleLinesByParanoiaLevel[1][0];
+        $this->assertStringContainsString('REQUEST_URI|ARGS', $storedLine);
+        $this->assertStringNotContainsString('REQUEST_URI_RAW', $storedLine);
+    }
+
+    public function testKeepsARequestUriRawOnlyRuleThatWouldOtherwiseBeUnsupported(): void
+    {
+        $fileTransformation = $this->transformer()->transform(
+            'SecRule REQUEST_URI_RAW "@rx \.\./" "id:930112,phase:1,block"',
+        );
+
+        $this->assertSame(1, $fileTransformation->keptRuleCount(), 'REQUEST_URI_RAW is remapped to the supported REQUEST_URI');
+        $this->assertStringContainsString('SecRule REQUEST_URI ', $fileTransformation->ruleLinesByParanoiaLevel[1][0]);
+    }
+
+    public function testLeavesLiteralRequestUriRawInsideThePatternUntouched(): void
+    {
+        $fileTransformation = $this->transformer()->transform(
+            'SecRule ARGS "@rx REQUEST_URI_RAW" "id:930113,phase:1,block"',
+        );
+
+        $this->assertStringContainsString('@rx REQUEST_URI_RAW', $fileTransformation->ruleLinesByParanoiaLevel[1][0]);
+    }
+
+    public function testInjectsCaseInsensitiveFlagIntoLowercasedRegexRules(): void
+    {
+        $fileTransformation = $this->transformer()->transform(
+            'SecRule ARGS "@rx java\b" "id:944240,phase:2,block,t:none,t:lowercase"',
+        );
+
+        $this->assertStringContainsString('"@rx (?i)java\b"', $fileTransformation->ruleLinesByParanoiaLevel[1][0]);
+    }
+
+    public function testDoesNotInjectCaseInsensitiveFlagWithoutTheLowercaseTransform(): void
+    {
+        $fileTransformation = $this->transformer()->transform(
+            'SecRule ARGS "@rx java\b" "id:944241,phase:2,block,t:none"',
+        );
+
+        $storedLine = $fileTransformation->ruleLinesByParanoiaLevel[1][0];
+        $this->assertStringContainsString('"@rx java\b"', $storedLine);
+        $this->assertStringNotContainsString('(?i)', $storedLine);
+    }
+
+    public function testDoesNotDoubleInjectWhenThePatternIsAlreadyCaseInsensitive(): void
+    {
+        $fileTransformation = $this->transformer()->transform(
+            'SecRule ARGS "@rx (?i)java\b" "id:944242,phase:2,block,t:none,t:lowercase"',
+        );
+
+        $storedLine = $fileTransformation->ruleLinesByParanoiaLevel[1][0];
+        $this->assertStringContainsString('"@rx (?i)java\b"', $storedLine);
+        $this->assertStringNotContainsString('(?i)(?i)', $storedLine);
+    }
+
+    public function testInjectsCaseInsensitiveFlagAheadOfANonCaseModifierGroup(): void
+    {
+        $fileTransformation = $this->transformer()->transform(
+            'SecRule ARGS "@rx (?:java|scala)\b" "id:944244,phase:2,block,t:none,t:lowercase"',
+        );
+
+        // A leading non-capturing group does not set the case-insensitive flag, so (?i) is prepended.
+        $this->assertStringContainsString('"@rx (?i)(?:java|scala)\b"', $fileTransformation->ruleLinesByParanoiaLevel[1][0]);
+    }
+
+    public function testDoesNotInjectCaseInsensitiveFlagForNonRegexOperators(): void
+    {
+        $fileTransformation = $this->transformer()->transform(
+            'SecRule ARGS "@contains java" "id:944243,phase:2,block,t:none,t:lowercase"',
+        );
+
+        $this->assertStringNotContainsString('(?i)', $fileTransformation->ruleLinesByParanoiaLevel[1][0]);
+    }
+
     public function testDropsRulesWithoutAnId(): void
     {
         $fileTransformation = $this->transformer()->transform(
