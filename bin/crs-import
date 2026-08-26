@@ -5,12 +5,16 @@
  * Imports the OWASP Core Rule Set into resources/rules.
  *
  * Usage:
- *   bin/crs-import [--tag=v4.16.0] [--source=/path/to/coreruleset] [--dest=resources/rules]
+ *   bin/crs-import [--tag=v4.16.0] [--sha256=<hex>] [--source=/path/to/coreruleset] [--dest=resources/rules]
  *
- * Without --tag the latest upstream release is resolved via the GitHub API.
- * With --source a local coreruleset checkout (or its rules/ directory) is
- * used instead of downloading; --tag then labels the manifest (default "local").
- * Set GITHUB_TOKEN to raise the GitHub API rate limit.
+ * Prefer an explicit --tag for a reproducible import; without it the latest
+ * upstream release is resolved via the GitHub API (non-reproducible, warned).
+ * Pass --sha256 to verify the downloaded release tarball against a pinned hash
+ * before it is extracted; the computed hash is always printed so it can be pinned.
+ * With --source a local coreruleset checkout (or its rules/ directory) is used
+ * instead of downloading; --tag then labels the manifest (default "local").
+ * Set GITHUB_TOKEN to raise the GitHub API rate limit; the token is only sent to
+ * api.github.com, never to the release-tarball download.
  */
 
 declare(strict_types=1);
@@ -32,45 +36,77 @@ if (!class_exists(Importer::class)) {
     exit(1);
 }
 
+// Bounds on network reads and archive extraction so a malicious or oversized
+// response cannot exhaust memory. The CRS tarball is ~2 MiB and its entries are
+// a few KiB each; the limits are generous headroom, not tight fits.
+const MAX_API_RESPONSE_BYTES = 1_048_576;   // 1 MiB - the releases JSON is a few KB
+const MAX_TARBALL_BYTES = 67_108_864;       // 64 MiB - whole release tarball
+const MAX_ENTRY_BYTES = 8_388_608;          // 8 MiB per extracted rule/data/license file
+const MAX_HTTP_REDIRECTS = 3;
+
 /**
  * @param list<string> $argv
- * @return array{tag: ?string, source: ?string, dest: string}
+ * @return array{tag: ?string, sha256: ?string, source: ?string, dest: string}
  */
 function parseArguments(array $argv): array
 {
-    $options = ['tag' => null, 'source' => null, 'dest' => dirname(__DIR__) . '/resources/rules'];
+    $options = ['tag' => null, 'sha256' => null, 'source' => null, 'dest' => dirname(__DIR__) . '/resources/rules'];
     foreach (array_slice($argv, 1) as $argument) {
-        if (preg_match('/^--(tag|source|dest)=(.+)$/', $argument, $matches) === 1) {
+        if (preg_match('/^--(tag|sha256|source|dest)=(.+)$/', $argument, $matches) === 1) {
             $options[$matches[1]] = $matches[2];
             continue;
         }
 
         fwrite(STDERR, "Unknown argument: {$argument}\n");
-        fwrite(STDERR, "Usage: bin/crs-import [--tag=v4.16.0] [--source=/path/to/coreruleset] [--dest=resources/rules]\n");
+        fwrite(STDERR, "Usage: bin/crs-import [--tag=v4.16.0] [--sha256=<hex>] [--source=/path/to/coreruleset] [--dest=resources/rules]\n");
         exit(1);
     }
 
     return $options;
 }
 
-function httpGet(string $url): string
+/**
+ * Fetch a URL into memory with an explicit byte cap and redirect limit.
+ *
+ * The GitHub token is sent only when $sendToken is true so it stays scoped to the
+ * api.github.com call, and a credentialed request follows no redirect, so the token
+ * can never be forwarded to a redirect target. The release-tarball download runs
+ * without the token and may follow its github.com -> codeload.github.com redirect.
+ */
+function httpGet(string $url, bool $sendToken, int $maxBytes): string
 {
     $headers = [
         'User-Agent: flowd-phirewall-preset-owasp-crs-import',
         'Accept: application/vnd.github+json',
     ];
-    $token = getenv('GITHUB_TOKEN');
-    if (is_string($token) && $token !== '') {
-        $headers[] = 'Authorization: Bearer ' . $token;
+    if ($sendToken) {
+        $token = getenv('GITHUB_TOKEN');
+        if (is_string($token) && $token !== '') {
+            $headers[] = 'Authorization: Bearer ' . $token;
+        }
     }
 
+    // A credentialed request follows no redirect at all, so the token can never be
+    // forwarded to a redirect target; the unauthenticated tarball download follows the
+    // github.com -> codeload.github.com redirect within an explicit cap.
     $context = stream_context_create([
-        'http' => ['header' => implode("\r\n", $headers), 'timeout' => 60, 'follow_location' => 1],
+        'http' => [
+            'header' => implode("\r\n", $headers),
+            'timeout' => 60,
+            'follow_location' => $sendToken ? 0 : 1,
+            'max_redirects' => MAX_HTTP_REDIRECTS,
+        ],
     ]);
 
-    $content = @file_get_contents($url, false, $context);
+    // Read one byte past the cap so an over-size response is detected instead of
+    // silently truncated, bounding the in-memory read regardless of the server.
+    $content = @file_get_contents($url, false, $context, 0, $maxBytes + 1);
     if ($content === false) {
         throw new RuntimeException('HTTP request failed: ' . $url);
+    }
+
+    if (strlen($content) > $maxBytes) {
+        throw new RuntimeException(sprintf('Response from %s exceeded the %d-byte limit.', $url, $maxBytes));
     }
 
     return $content;
@@ -78,7 +114,7 @@ function httpGet(string $url): string
 
 function resolveLatestTag(): string
 {
-    $json = httpGet('https://api.github.com/repos/coreruleset/coreruleset/releases/latest');
+    $json = httpGet('https://api.github.com/repos/coreruleset/coreruleset/releases/latest', true, MAX_API_RESPONSE_BYTES);
     $data = json_decode($json, true);
     $tag = is_array($data) ? ($data['tag_name'] ?? null) : null;
     if (!is_string($tag) || $tag === '') {
@@ -89,16 +125,29 @@ function resolveLatestTag(): string
 }
 
 /**
- * Download the release tarball and read rule, data, license and notice files
- * from it via the phar:// stream, without extracting to disk.
+ * Download the release tarball, optionally verify its SHA-256 against a pinned
+ * hash, then read the rule, data, license and notice files from it.
  *
  * @return array{files: array<string, string>, license: ?string, notice: ?string}
  */
-function readReleaseTarball(string $tag): array
+function readReleaseTarball(string $tag, ?string $expectedSha256): array
 {
     $url = sprintf('https://github.com/coreruleset/coreruleset/archive/refs/tags/%s.tar.gz', rawurlencode($tag));
     echo "Downloading {$url}\n";
-    $tarball = httpGet($url);
+    // No GitHub token on the tarball download: it redirects to codeload.github.com
+    // and the token must not be forwarded across that redirect.
+    $tarball = httpGet($url, false, MAX_TARBALL_BYTES);
+
+    $actualSha256 = hash('sha256', $tarball);
+    echo "SHA-256: {$actualSha256}\n";
+    if ($expectedSha256 !== null && !hash_equals(strtolower($expectedSha256), $actualSha256)) {
+        throw new RuntimeException(sprintf(
+            'SHA-256 mismatch for %s: expected %s, got %s.',
+            $tag,
+            strtolower($expectedSha256),
+            $actualSha256,
+        ));
+    }
 
     $downloadDirectory = dirname(__DIR__) . '/.build/crs-import';
     if (!is_dir($downloadDirectory) && !mkdir($downloadDirectory, 0o775, true) && !is_dir($downloadDirectory)) {
@@ -110,6 +159,22 @@ function readReleaseTarball(string $tag): array
         throw new RuntimeException('Cannot write tarball: ' . $tarballPath);
     }
 
+    try {
+        return extractRuleFiles($tarballPath);
+    } finally {
+        unlink($tarballPath);
+    }
+}
+
+/**
+ * Read the rule, data, license and notice files from a release tarball via the
+ * phar:// stream, without extracting to disk. Each entry is bounded to
+ * {@see MAX_ENTRY_BYTES} so a decompression-bomb archive cannot exhaust memory.
+ *
+ * @return array{files: array<string, string>, license: ?string, notice: ?string}
+ */
+function extractRuleFiles(string $tarballPath): array
+{
     $pharData = new PharData($tarballPath);
     $files = [];
     $license = null;
@@ -117,24 +182,41 @@ function readReleaseTarball(string $tag): array
     $iterator = new RecursiveIteratorIterator($pharData);
     foreach ($iterator as $pharFileInfo) {
         /** @var PharFileInfo $pharFileInfo */
+        if ($pharFileInfo->getSize() > MAX_ENTRY_BYTES) {
+            throw new RuntimeException(sprintf(
+                'Archive entry %s (%d bytes) exceeds the %d-byte limit.',
+                $pharFileInfo->getFilename(),
+                $pharFileInfo->getSize(),
+                MAX_ENTRY_BYTES,
+            ));
+        }
+
         $pathname = $pharFileInfo->getPathname();
         $relativePath = preg_replace('#^phar://.*?\.tar\.gz/[^/]+/#', '', str_replace('\\', '/', $pathname)) ?? '';
 
         if (preg_match('#^rules/[^/]+\.(conf|data)$#', $relativePath) === 1) {
-            $files[$relativePath] = (string)file_get_contents($pathname);
+            $files[$relativePath] = readCappedEntry($pathname);
             continue;
         }
 
         if ($relativePath === 'LICENSE') {
-            $license = (string)file_get_contents($pathname);
+            $license = readCappedEntry($pathname);
         } elseif ($relativePath === 'NOTICE') {
-            $notice = (string)file_get_contents($pathname);
+            $notice = readCappedEntry($pathname);
         }
     }
 
-    unlink($tarballPath);
-
     return ['files' => $files, 'license' => $license, 'notice' => $notice];
+}
+
+/**
+ * Read an archive entry with a hard byte cap. The declared size was already
+ * checked, but the tar header size is attacker-influenced, so bound the actual
+ * bytes pulled into memory too.
+ */
+function readCappedEntry(string $pathname): string
+{
+    return (string)file_get_contents($pathname, false, null, 0, MAX_ENTRY_BYTES);
 }
 
 /**
@@ -173,16 +255,28 @@ function readFirstExisting(array $paths): ?string
     return null;
 }
 
-$options = parseArguments($argv);
+/**
+ * Run the import. Guarded below so this file can be required (e.g. for testing
+ * the helpers) without executing the import.
+ *
+ * @param list<string> $argv
+ */
+function runImport(array $argv): void
+{
+    $options = parseArguments($argv);
 
-try {
     if ($options['source'] !== null) {
         $tag = $options['tag'] ?? 'local';
         $source = readLocalSource($options['source']);
     } else {
-        $tag = $options['tag'] ?? resolveLatestTag();
+        $tag = $options['tag'];
+        if ($tag === null) {
+            fwrite(STDERR, "Warning: no --tag given; resolving the latest release is not reproducible. Pin --tag=vX.Y.Z (and --sha256=<hex>) for a deterministic import.\n");
+            $tag = resolveLatestTag();
+        }
+
         echo "Importing OWASP CRS {$tag}\n";
-        $source = readReleaseTarball($tag);
+        $source = readReleaseTarball($tag, $options['sha256']);
     }
 
     $importer = new Importer();
@@ -194,21 +288,28 @@ try {
         $source['license'],
         $source['notice'],
     );
-} catch (Throwable $throwable) {
-    fwrite(STDERR, 'Import failed: ' . $throwable->getMessage() . "\n");
-    exit(1);
+
+    echo "\nImported OWASP CRS {$importReport->crsVersion} into {$options['dest']}\n";
+    echo sprintf("Kept rules: %d\n", $importReport->keptRuleCount());
+    foreach ($importReport->ruleCountsByParanoiaLevel as $level => $count) {
+        echo sprintf("  paranoia level %d: %d\n", $level, $count);
+    }
+
+    echo sprintf("Dropped rules: %d\n", $importReport->droppedRuleCount());
+    foreach ($importReport->droppedRuleCounts as $reason => $count) {
+        echo sprintf("  %s: %d\n", $reason, $count);
+    }
+
+    echo sprintf("Data files: %s\n", $importReport->dataFiles === [] ? '(none)' : implode(', ', $importReport->dataFiles));
+    echo sprintf("Generated files: %d\n", count($importReport->generatedFiles));
 }
 
-echo "\nImported OWASP CRS {$importReport->crsVersion} into {$options['dest']}\n";
-echo sprintf("Kept rules: %d\n", $importReport->keptRuleCount());
-foreach ($importReport->ruleCountsByParanoiaLevel as $level => $count) {
-    echo sprintf("  paranoia level %d: %d\n", $level, $count);
+// Only run when executed directly, not when required by a test harness.
+if (PHP_SAPI === 'cli' && isset($argv[0]) && realpath($argv[0]) === realpath(__FILE__)) {
+    try {
+        runImport($argv);
+    } catch (Throwable $throwable) {
+        fwrite(STDERR, 'Import failed: ' . $throwable->getMessage() . "\n");
+        exit(1);
+    }
 }
-
-echo sprintf("Dropped rules: %d\n", $importReport->droppedRuleCount());
-foreach ($importReport->droppedRuleCounts as $reason => $count) {
-    echo sprintf("  %s: %d\n", $reason, $count);
-}
-
-echo sprintf("Data files: %s\n", $importReport->dataFiles === [] ? '(none)' : implode(', ', $importReport->dataFiles));
-echo sprintf("Generated files: %d\n", count($importReport->generatedFiles));
