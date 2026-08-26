@@ -40,7 +40,7 @@ RULE;
         $serverRequest = (new ServerRequest('GET', '/'))
             ->withQueryParams(['q' => '$x(bar);']);
 
-        $this->assertSame(933210, $coreRuleSet->match($serverRequest));
+        $this->assertSame([933210], $coreRuleSet->evaluate($serverRequest)->matchedRuleIds());
     }
 
     public function testRule933210FromExamplesMatchesOnRequestFilename(): void
@@ -53,6 +53,6 @@ RULE;
 
         // Place function-call looking pattern in the request filename (basename of path)
         $serverRequest = new ServerRequest('GET', '/uploads/(alpha)(bravo);');
-        $this->assertSame(933210, $coreRuleSet->match($serverRequest));
+        $this->assertSame([933210], $coreRuleSet->evaluate($serverRequest)->matchedRuleIds());
     }
 }

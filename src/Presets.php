@@ -10,6 +10,7 @@ use Flowd\Phirewall\Config\Rule\Fail2BanRule;
 use Flowd\Phirewall\ConfigLayer;
 use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSet;
 use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSetMatcher;
+use Psr\Log\LoggerInterface;
 
 /**
  * OWASP CRS presets as Config layers.
@@ -17,6 +18,14 @@ use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSetMatcher;
  * Each factory returns a {@see ConfigLayer} for {@see Config::with()}:
  *
  *     $config = $config->with(Presets::blocklist(ParanoiaLevel::Level1));
+ *
+ * Requests are blocked when their accumulated anomaly score reaches
+ * $anomalyThreshold (CRS default 5); $configure receives the matcher for
+ * tuning (exclusions, manipulators, enable/disable) before the first request:
+ *
+ *     $config = $config->with(Presets::blocklist(configure: function (CoreRuleSetMatcher $matcher): void {
+ *         $matcher->excludeTarget('ARGS:/^utm_/');
+ *     }));
  */
 final class Presets
 {
@@ -29,31 +38,38 @@ final class Presets
     }
 
     /**
-     * Block every request that matches an active CRS rule.
+     * Block every request whose accumulated CRS anomaly score reaches the threshold.
+     *
+     * @param \Closure(CoreRuleSetMatcher): void|null $configure
      */
     public static function blocklist(
         ParanoiaLevel $paranoiaLevel = ParanoiaLevel::Level1,
         ?string $rulesDirectory = null,
+        int $anomalyThreshold = CoreRuleSetMatcher::DEFAULT_ANOMALY_THRESHOLD,
+        ?\Closure $configure = null,
+        ?LoggerInterface $logger = null,
     ): ConfigLayer {
-        return self::layer(static function (Config $config) use ($paranoiaLevel, $rulesDirectory): void {
-            $config->blocklists->addRule(new BlocklistRule(
-                self::BLOCKLIST_RULE_NAME,
-                CoreRuleSetMatcher::fromRuleFiles($paranoiaLevel, $rulesDirectory),
-            ));
+        return self::layer(static function (Config $config) use ($paranoiaLevel, $rulesDirectory, $anomalyThreshold, $configure, $logger): void {
+            $matcher = CoreRuleSetMatcher::fromRuleFiles($paranoiaLevel, $rulesDirectory, null, $anomalyThreshold, $logger);
+            if ($configure instanceof \Closure) {
+                $configure($matcher);
+            }
+
+            $config->blocklists->addRule(new BlocklistRule(self::BLOCKLIST_RULE_NAME, $matcher));
         });
     }
 
     /**
-     * Block every CRS rule match and ban repeat offenders.
+     * Block scoring requests and ban repeat offenders.
      *
-     * A CRS match marks a request as malicious, so every match is blocked (403).
-     * A match below $threshold blocks and counts (Fail2BanMatched); the $threshold-th
-     * match within $period seconds additionally bans the client key (IP by default)
-     * for $ban seconds, so any further request from that key is blocked until the ban
-     * expires.
+     * A request whose accumulated anomaly score reaches $anomalyThreshold is
+     * blocked (403) and counts toward the ban (Fail2BanMatched); the
+     * $threshold-th such request within $period seconds additionally bans
+     * the client key (IP by default) for $ban seconds, so any further request
+     * from that key is blocked until the ban expires. Anomaly scores never
+     * accumulate across requests.
      *
-     * With phirewall 0.8 this is stricter than 0.7, where a match below the threshold
-     * passed through and only counted.
+     * @param \Closure(CoreRuleSetMatcher): void|null $configure
      */
     public static function fail2ban(
         ParanoiaLevel $paranoiaLevel = ParanoiaLevel::Level1,
@@ -61,14 +77,22 @@ final class Presets
         int $period = 600,
         int $ban = 3600,
         ?string $rulesDirectory = null,
+        int $anomalyThreshold = CoreRuleSetMatcher::DEFAULT_ANOMALY_THRESHOLD,
+        ?\Closure $configure = null,
+        ?LoggerInterface $logger = null,
     ): ConfigLayer {
-        return self::layer(static function (Config $config) use ($paranoiaLevel, $threshold, $period, $ban, $rulesDirectory): void {
+        return self::layer(static function (Config $config) use ($paranoiaLevel, $threshold, $period, $ban, $rulesDirectory, $anomalyThreshold, $configure, $logger): void {
+            $matcher = CoreRuleSetMatcher::fromRuleFiles($paranoiaLevel, $rulesDirectory, null, $anomalyThreshold, $logger);
+            if ($configure instanceof \Closure) {
+                $configure($matcher);
+            }
+
             $config->fail2ban->addRule(new Fail2BanRule(
                 self::FAIL2BAN_RULE_NAME,
                 $threshold,
                 $period,
                 $ban,
-                CoreRuleSetMatcher::fromRuleFiles($paranoiaLevel, $rulesDirectory),
+                $matcher,
                 null,
             ));
         });

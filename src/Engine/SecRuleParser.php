@@ -10,10 +10,14 @@ namespace Flowd\PhirewallPresetOwaspCrs\Engine;
  * The set of supported variables is defined by {@see Variable\VariableCollectorFactory}
  * and the set of supported operators by {@see Operator\OperatorEvaluatorFactory};
  * those factories are the source of truth. Actions: id (required), phase (ignored),
- * deny/block (boolean), msg (optional).
+ * deny/block (boolean), msg/logdata (optional), severity (resolved to an anomaly
+ * score, missing/unknown scores as CRITICAL), tag (collected as a list; the
+ * paranoia level is read from a `paranoia-level/N` tag).
  */
 final class SecRuleParser
 {
+    private const PARANOIA_LEVEL_TAG_PATTERN = '#^paranoia-level/([1-4])$#';
+
     /**
      * Parse a raw CRS "SecRule" line into a CoreRule, or null if unsupported.
      */
@@ -57,7 +61,7 @@ final class SecRuleParser
         }
 
         // Actions: comma-separated key[:value]
-        $actions = $this->parseActions($actionsPart);
+        ['actions' => $actions, 'tags' => $tags] = $this->parseActions($actionsPart);
         $id = isset($actions['id']) ? (int)$actions['id'] : 0;
         if ($id <= 0) {
             return null; // require id
@@ -68,7 +72,25 @@ final class SecRuleParser
         $hasBlock = array_key_exists('block', $actions) ? (bool)$actions['block'] : str_contains($actionsPart, 'block');
         $actions['deny'] = $hasDeny || $hasBlock;
 
-        return new CoreRule($id, $variables, $op, $arg, $actions, $contextFolder);
+        $severity = null;
+        $anomalyScore = 5;
+        $severityAction = $actions['severity'] ?? null;
+        if (is_int($severityAction) || is_string($severityAction)) {
+            $resolved = Severity::tryFromActionValue($severityAction);
+            if ($resolved instanceof Severity) {
+                $severity = $resolved->value;
+                $anomalyScore = $resolved->anomalyScore();
+            }
+        }
+
+        $paranoiaLevel = 1;
+        foreach ($tags as $tag) {
+            if (preg_match(self::PARANOIA_LEVEL_TAG_PATTERN, $tag, $matches) === 1) {
+                $paranoiaLevel = (int)$matches[1];
+            }
+        }
+
+        return new CoreRule($id, $variables, $op, $arg, $actions, $contextFolder, $anomalyScore, $severity, $paranoiaLevel, $tags);
     }
 
     /**
@@ -207,8 +229,10 @@ final class SecRuleParser
 
     /**
      * Parse actions key/value map. Values can be quoted (single or double). Commas separate actions.
-     * Boolean actions like "deny" will be set to true.
-     * @return array<string, int|string|bool>
+     * Boolean actions like "deny" will be set to true. Repeated `tag:` actions are
+     * collected into the tags list (in source order) instead of the last-wins map.
+     *
+     * @return array{actions: array<string, int|string|bool>, tags: list<string>}
      */
     private function parseActions(string $actionsPart): array
     {
@@ -239,6 +263,7 @@ final class SecRuleParser
             $parts[] = trim($buffer);
         }
 
+        $tags = [];
         foreach ($parts as $part) {
             if ($part === '') {
                 continue;
@@ -250,11 +275,16 @@ final class SecRuleParser
             } else {
                 $key = trim($kv[0]);
                 $value = $this->stripQuotes(trim($kv[1]));
+                if ($key === 'tag') {
+                    $tags[] = $value;
+                    continue;
+                }
+
                 $actions[$key] = is_numeric($value) ? (int)$value : $value;
             }
         }
 
-        return $actions;
+        return ['actions' => $actions, 'tags' => $tags];
     }
 
     private function stripQuotes(string $value): string

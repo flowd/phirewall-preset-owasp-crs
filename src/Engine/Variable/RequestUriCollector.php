@@ -11,13 +11,13 @@ use Psr\Http\Message\ServerRequestInterface;
  */
 final readonly class RequestUriCollector implements VariableCollectorInterface
 {
-    /** @return list<string> */
+    /** @return list<array{name: ?string, value: string}> */
     public function collect(ServerRequestInterface $serverRequest): array
     {
         $uri = $serverRequest->getUri();
         $query = $uri->getQuery();
         $value = $uri->getPath() . ($query !== '' ? '?' . $query : '');
 
-        return [$value];
+        return [['name' => null, 'value' => $value]];
     }
 }

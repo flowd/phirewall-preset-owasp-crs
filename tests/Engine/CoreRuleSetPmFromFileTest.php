@@ -36,14 +36,14 @@ TXT;
 
         // Matches any phrase (case-insensitive)
         $this->assertTrue($rule->matches(new ServerRequest('GET', '/admin')));
-        $this->assertSame(730001, $set->match(new ServerRequest('GET', '/admin')));
-        $this->assertSame(730001, $set->match(new ServerRequest('GET', '/SECRET/path')));
-        $this->assertSame(730001, $set->match(new ServerRequest('GET', '/one/alpha-two')));
-        $this->assertSame(730001, $set->match(new ServerRequest('GET', '/beta')));
-        $this->assertSame(730001, $set->match(new ServerRequest('GET', '/GAMMA')));
+        $this->assertSame([730001], $set->evaluate(new ServerRequest('GET', '/admin'))->matchedRuleIds());
+        $this->assertSame([730001], $set->evaluate(new ServerRequest('GET', '/SECRET/path'))->matchedRuleIds());
+        $this->assertSame([730001], $set->evaluate(new ServerRequest('GET', '/one/alpha-two'))->matchedRuleIds());
+        $this->assertSame([730001], $set->evaluate(new ServerRequest('GET', '/beta'))->matchedRuleIds());
+        $this->assertSame([730001], $set->evaluate(new ServerRequest('GET', '/GAMMA'))->matchedRuleIds());
 
         // Non-matching
-        $this->assertNull($set->match(new ServerRequest('GET', '/nohit')));
+        $this->assertSame([], $set->evaluate(new ServerRequest('GET', '/nohit'))->matchedRuleIds());
     }
 
     public function testPmFromFileMissingFileIsSafeNoMatch(): void
@@ -51,7 +51,7 @@ TXT;
         vfsStream::setup('missing');
         $rulesText = 'SecRule REQUEST_URI "@pmFromFile vfs://missing/nonexistent.txt" "id:730002,phase:2,deny"';
         $coreRuleSet = SecRuleLoader::fromString($rulesText);
-        $this->assertNull($coreRuleSet->match(new ServerRequest('GET', '/anything')));
+        $this->assertSame([], $coreRuleSet->evaluate(new ServerRequest('GET', '/anything'))->matchedRuleIds());
     }
 
     public function testPmFromFileRespectsPhraseCap(): void
@@ -70,9 +70,9 @@ TXT;
         $set = SecRuleLoader::fromString($rulesText);
 
         // Should match an early phrase (within cap)
-        $this->assertSame(730003, $set->match(new ServerRequest('GET', '/p10')));
+        $this->assertSame([730003], $set->evaluate(new ServerRequest('GET', '/p10'))->matchedRuleIds());
         // Should not match phrase expected beyond cap (best-effort check)
-        $this->assertNull($set->match(new ServerRequest('GET', '/beyond-cap')));
+        $this->assertSame([], $set->evaluate(new ServerRequest('GET', '/beyond-cap'))->matchedRuleIds());
     }
 
     public function testPmFromFileRejectsPathTraversal(): void
@@ -82,7 +82,7 @@ TXT;
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('Path traversal detected');
-        $coreRuleSet->match(new ServerRequest('GET', '/?foo=test'));
+        $coreRuleSet->evaluate(new ServerRequest('GET', '/?foo=test'));
     }
 
     public function testPmFromFileAllowsContextFolderWithDoubleDot(): void
@@ -96,7 +96,7 @@ TXT;
         $rulesText = 'SecRule ARGS "@pmFromFile phrases.txt" "id:730005,phase:2,deny"';
         $set = SecRuleLoader::fromString($rulesText, $contextFolder);
 
-        $result = $set->match(new ServerRequest('GET', '/?q=blocked-word'));
-        $this->assertNotNull($result);
+        $result = $set->evaluate(new ServerRequest('GET', '/?q=blocked-word'));
+        $this->assertSame([730005], $result->matchedRuleIds());
     }
 }

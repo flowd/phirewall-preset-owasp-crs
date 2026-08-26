@@ -7,7 +7,7 @@ namespace Flowd\PhirewallPresetOwaspCrs\Engine\Operator;
 /**
  * Evaluates values for case-insensitive suffix match (@endswith operator).
  */
-final readonly class EndsWithEvaluator implements OperatorEvaluatorInterface
+final readonly class EndsWithEvaluator implements DetailedOperatorEvaluatorInterface
 {
     private int $suffixLength;
 
@@ -19,16 +19,22 @@ final readonly class EndsWithEvaluator implements OperatorEvaluatorInterface
     /** @param list<string> $values */
     public function evaluate(array $values): bool
     {
+        return $this->outcome($values) !== OperatorResult::noMatch();
+    }
+
+    /** @param list<string> $values */
+    public function outcome(array $values): OperatorResult
+    {
         if ($this->suffix === '' || $this->suffixLength === 0) {
-            return false;
+            return OperatorResult::noMatch();
         }
 
-        foreach ($values as $value) {
+        foreach ($values as $index => $value) {
             if (strcasecmp(substr($value, -$this->suffixLength), $this->suffix) === 0) {
-                return true;
+                return OperatorResult::matched($index);
             }
         }
 
-        return false;
+        return OperatorResult::noMatch();
     }
 }

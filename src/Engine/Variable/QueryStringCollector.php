@@ -11,9 +11,9 @@ use Psr\Http\Message\ServerRequestInterface;
  */
 final readonly class QueryStringCollector implements VariableCollectorInterface
 {
-    /** @return list<string> */
+    /** @return list<array{name: ?string, value: string}> */
     public function collect(ServerRequestInterface $serverRequest): array
     {
-        return [$serverRequest->getUri()->getQuery()];
+        return [['name' => null, 'value' => $serverRequest->getUri()->getQuery()]];
     }
 }

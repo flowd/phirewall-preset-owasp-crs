@@ -51,6 +51,7 @@ final readonly class Importer
 
         $ruleCountsByParanoiaLevel = [1 => 0, 2 => 0, 3 => 0, 4 => 0];
         $droppedRuleCounts = [];
+        $ruleCountsBySeverity = [];
         $referencedDataFiles = [];
         $generatedFiles = [];
 
@@ -59,6 +60,10 @@ final readonly class Importer
 
             foreach ($fileTransformation->droppedRuleCounts as $reason => $count) {
                 $droppedRuleCounts[$reason] = ($droppedRuleCounts[$reason] ?? 0) + $count;
+            }
+
+            foreach ($fileTransformation->keptRuleCountsBySeverity as $severity => $count) {
+                $ruleCountsBySeverity[$severity] = ($ruleCountsBySeverity[$severity] ?? 0) + $count;
             }
 
             foreach ($fileTransformation->referencedDataFiles as $dataFile) {
@@ -96,6 +101,7 @@ final readonly class Importer
         }
 
         ksort($droppedRuleCounts);
+        ksort($ruleCountsBySeverity);
         sort($dataFiles, SORT_STRING);
         sort($generatedFiles, SORT_STRING);
 
@@ -107,6 +113,7 @@ final readonly class Importer
             array_keys($ruleFilesByName),
             $dataFiles,
             $generatedFiles,
+            $ruleCountsBySeverity,
         );
 
         $manifestJson = json_encode($importReport->toManifestArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);

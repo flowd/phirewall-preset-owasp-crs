@@ -16,10 +16,10 @@ final class CoreRuleSetVariablesTest extends TestCase
         $coreRuleSet = SecRuleLoader::fromString($rulesText);
 
         $req = new ServerRequest('GET', '/admin?x=1');
-        $this->assertSame(400001, $coreRuleSet->match($req));
+        $this->assertSame([400001], $coreRuleSet->evaluate($req)->matchedRuleIds());
 
         $reqNo = new ServerRequest('GET', '/admin?x=2');
-        $this->assertNull($coreRuleSet->match($reqNo));
+        $this->assertSame([], $coreRuleSet->evaluate($reqNo)->matchedRuleIds());
     }
 
     public function testRequestMethodExactMatch(): void
@@ -27,8 +27,8 @@ final class CoreRuleSetVariablesTest extends TestCase
         $rulesText = 'SecRule REQUEST_METHOD "@streq POST" "id:400002,phase:2,deny,msg:\'POST only\'"';
         $coreRuleSet = SecRuleLoader::fromString($rulesText);
 
-        $this->assertSame(400002, $coreRuleSet->match(new ServerRequest('POST', '/')));
-        $this->assertNull($coreRuleSet->match(new ServerRequest('GET', '/')));
+        $this->assertSame([400002], $coreRuleSet->evaluate(new ServerRequest('POST', '/'))->matchedRuleIds());
+        $this->assertSame([], $coreRuleSet->evaluate(new ServerRequest('GET', '/'))->matchedRuleIds());
     }
 
     public function testQueryStringExactMatch(): void
@@ -36,9 +36,9 @@ final class CoreRuleSetVariablesTest extends TestCase
         $rulesText = 'SecRule QUERY_STRING "@streq a=1&b=2" "id:400003,phase:2,deny,msg:\'Query exact\'"';
         $coreRuleSet = SecRuleLoader::fromString($rulesText);
 
-        $this->assertSame(400003, $coreRuleSet->match(new ServerRequest('GET', '/p?a=1&b=2')));
-        $this->assertNull($coreRuleSet->match(new ServerRequest('GET', '/p?a=1&b=3')));
-        $this->assertNull($coreRuleSet->match(new ServerRequest('GET', '/p')));
+        $this->assertSame([400003], $coreRuleSet->evaluate(new ServerRequest('GET', '/p?a=1&b=2'))->matchedRuleIds());
+        $this->assertSame([], $coreRuleSet->evaluate(new ServerRequest('GET', '/p?a=1&b=3'))->matchedRuleIds());
+        $this->assertSame([], $coreRuleSet->evaluate(new ServerRequest('GET', '/p'))->matchedRuleIds());
     }
 
     public function testArgsValuesAndNames(): void
@@ -56,9 +56,9 @@ final class CoreRuleSetVariablesTest extends TestCase
         ]);
 
         // ARGS collects both values and names; value 'secret' should match contains
-        $this->assertSame(400004, $coreRuleSet->match($req));
+        $this->assertSame([400004], $coreRuleSet->evaluate($req)->matchedRuleIds());
         // ARGS also includes names, so exact match on name 'token' should match
-        $this->assertSame(400005, $setName->match($req));
+        $this->assertSame([400005], $setName->evaluate($req)->matchedRuleIds());
     }
 
     public function testArgsNamesCoversQueryAndBodyKeys(): void
@@ -72,13 +72,13 @@ final class CoreRuleSetVariablesTest extends TestCase
             'z' => 1,
         ]);
 
-        $this->assertSame(400006, $coreRuleSet->match($req));
+        $this->assertSame([400006], $coreRuleSet->evaluate($req)->matchedRuleIds());
 
         $reqNo = new ServerRequest('GET', '/x?foo=1&bar=2');
         $reqNo = $reqNo->withParsedBody([
             'z' => 1,
         ]);
-        $this->assertNull($coreRuleSet->match($reqNo));
+        $this->assertSame([], $coreRuleSet->evaluate($reqNo)->matchedRuleIds());
     }
 
     public function testRequestHeadersValues(): void
@@ -88,11 +88,11 @@ final class CoreRuleSetVariablesTest extends TestCase
 
         $serverRequest = (new ServerRequest('GET', '/'))
             ->withHeader('User-Agent', ['Mozilla/5.0', 'Extra']);
-        $this->assertSame(400007, $coreRuleSet->match($serverRequest));
+        $this->assertSame([400007], $coreRuleSet->evaluate($serverRequest)->matchedRuleIds());
 
         $reqNo = (new ServerRequest('GET', '/'))
             ->withHeader('User-Agent', 'curl/8.0.0');
-        $this->assertNull($coreRuleSet->match($reqNo));
+        $this->assertSame([], $coreRuleSet->evaluate($reqNo)->matchedRuleIds());
     }
 
     public function testRequestHeadersNames(): void
@@ -103,11 +103,11 @@ final class CoreRuleSetVariablesTest extends TestCase
         $serverRequest = (new ServerRequest('GET', '/'))
             ->withHeader('X-Test', '1')
             ->withHeader('Another', '2');
-        $this->assertSame(400008, $coreRuleSet->match($serverRequest));
+        $this->assertSame([400008], $coreRuleSet->evaluate($serverRequest)->matchedRuleIds());
 
         $reqNo = (new ServerRequest('GET', '/'))
             ->withHeader('Something-Else', 'x');
-        $this->assertNull($coreRuleSet->match($reqNo));
+        $this->assertSame([], $coreRuleSet->evaluate($reqNo)->matchedRuleIds());
     }
 
     public function testRequestCookiesValues(): void
@@ -117,11 +117,11 @@ final class CoreRuleSetVariablesTest extends TestCase
 
         $serverRequest = (new ServerRequest('GET', '/'))
             ->withCookieParams(['session' => 'abc', 'flavor' => 'chocolate']);
-        $this->assertSame(400009, $coreRuleSet->match($serverRequest));
+        $this->assertSame([400009], $coreRuleSet->evaluate($serverRequest)->matchedRuleIds());
 
         $reqNo = (new ServerRequest('GET', '/'))
             ->withCookieParams(['session' => 'abc']);
-        $this->assertNull($coreRuleSet->match($reqNo));
+        $this->assertSame([], $coreRuleSet->evaluate($reqNo)->matchedRuleIds());
     }
 
     public function testRequestCookiesNames(): void
@@ -131,10 +131,10 @@ final class CoreRuleSetVariablesTest extends TestCase
 
         $serverRequest = (new ServerRequest('GET', '/'))
             ->withCookieParams(['session' => 'abc', 'flavor' => 'vanilla']);
-        $this->assertSame(400010, $coreRuleSet->match($serverRequest));
+        $this->assertSame([400010], $coreRuleSet->evaluate($serverRequest)->matchedRuleIds());
 
         $reqNo = (new ServerRequest('GET', '/'))
             ->withCookieParams(['id' => '1']);
-        $this->assertNull($coreRuleSet->match($reqNo));
+        $this->assertSame([], $coreRuleSet->evaluate($reqNo)->matchedRuleIds());
     }
 }

@@ -56,7 +56,48 @@ final class CoreRuleSetMatcherLazyTest extends TestCase
         $this->assertTrue($matchResult->isMatch());
         $meta = $matchResult->metadata();
         $this->assertSame(400001, $meta['owasp_rule_id'] ?? null);
-        $this->assertSame(['X-Phirewall-Owasp-Rule' => '400001'], $meta['diagnostic_headers'] ?? null);
+        $this->assertSame([
+            'X-Phirewall-Owasp-Rule' => '400001',
+            'X-Phirewall-Owasp-Score' => '5/5',
+        ], $meta['diagnostic_headers'] ?? null);
+    }
+
+    public function testAnomalyThresholdAndTuningAreAppliedOnTheLazyPath(): void
+    {
+        [$root] = $this->rulesDirectory();
+
+        // Threshold 6 keeps the single CRITICAL rule (score 5) below the block line.
+        $tolerant = CoreRuleSetMatcher::fromRuleFiles(ParanoiaLevel::Level1, $root->url() . '/rules', null, 6);
+        $this->assertFalse($tolerant->match(new ServerRequest('GET', '/admin'))->isMatch());
+
+        // Queued exclusion before first use silences the rule's only target.
+        $tuned = CoreRuleSetMatcher::fromRuleFiles(ParanoiaLevel::Level1, $root->url() . '/rules');
+        $tuned->excludeTargetById(400001, 'REQUEST_URI');
+        $this->assertFalse($tuned->match(new ServerRequest('GET', '/admin'))->isMatch());
+    }
+
+    public function testQueuedInvalidSelectorFailsEagerly(): void
+    {
+        [$root] = $this->rulesDirectory();
+        $matcher = CoreRuleSetMatcher::fromRuleFiles(ParanoiaLevel::Level1, $root->url() . '/rules');
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        $matcher->excludeTarget('QUERY_STRING:utm_source');
+    }
+
+    public function testQueuedNegatedSelectorFailsEagerly(): void
+    {
+        // A negated exclusion must be rejected at registration, not on the first
+        // request: on the lazy path a first-request throw would be swallowed by a
+        // fail-open middleware and silently disable the whole rule set.
+        [$root] = $this->rulesDirectory();
+        $matcher = CoreRuleSetMatcher::fromRuleFiles(ParanoiaLevel::Level1, $root->url() . '/rules');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('implicitly negated');
+
+        $matcher->excludeTarget('!ARGS:sessionid');
     }
 
     public function testTogglesBeforeFirstUseAreQueuedAndApplied(): void
@@ -107,7 +148,7 @@ final class CoreRuleSetMatcherLazyTest extends TestCase
         // Seed a parseable but malformed artifact (a rule entry without the
         // expected keys) under the identifier the matcher will look up.
         $ruleFiles = \Flowd\PhirewallPresetOwaspCrs\RuleSetLoader::ruleFiles(ParanoiaLevel::Level1, $rulesDir);
-        $identifier = 'owasp-crs-v1-pl' . ParanoiaLevel::Level1->value . '-' . substr(sha1(implode('|', $ruleFiles)), 0, 12);
+        $identifier = 'owasp-crs-v2-pl' . ParanoiaLevel::Level1->value . '-' . substr(sha1(implode('|', $ruleFiles)), 0, 12);
         $compiledDataCache->load($identifier, $ruleFiles, static fn(): array => [['not' => 'a valid rule']]);
         CompiledDataCache::clearProcessCache();
 
@@ -128,7 +169,7 @@ final class CoreRuleSetMatcherLazyTest extends TestCase
 
         // Seed a well-formed but EMPTY artifact under the matcher's identifier.
         $ruleFiles = \Flowd\PhirewallPresetOwaspCrs\RuleSetLoader::ruleFiles(ParanoiaLevel::Level1, $rulesDir);
-        $identifier = 'owasp-crs-v1-pl' . ParanoiaLevel::Level1->value . '-' . substr(sha1(implode('|', $ruleFiles)), 0, 12);
+        $identifier = 'owasp-crs-v2-pl' . ParanoiaLevel::Level1->value . '-' . substr(sha1(implode('|', $ruleFiles)), 0, 12);
         $compiledDataCache->load($identifier, $ruleFiles, static fn(): array => []);
         CompiledDataCache::clearProcessCache();
 
@@ -150,7 +191,7 @@ final class CoreRuleSetMatcherLazyTest extends TestCase
         // A rule with the right keys/top-level types but a non-string element in
         // "variables" - type-invalid, so fromArray() must reject it.
         $ruleFiles = \Flowd\PhirewallPresetOwaspCrs\RuleSetLoader::ruleFiles(ParanoiaLevel::Level1, $rulesDir);
-        $identifier = 'owasp-crs-v1-pl' . ParanoiaLevel::Level1->value . '-' . substr(sha1(implode('|', $ruleFiles)), 0, 12);
+        $identifier = 'owasp-crs-v2-pl' . ParanoiaLevel::Level1->value . '-' . substr(sha1(implode('|', $ruleFiles)), 0, 12);
         $compiledDataCache->load($identifier, $ruleFiles, static fn(): array => [[
             'id' => 400001,
             'variables' => [123],

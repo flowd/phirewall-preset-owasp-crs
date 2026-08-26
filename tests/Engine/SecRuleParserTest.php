@@ -89,7 +89,8 @@ final class SecRuleParserTest extends TestCase
         $this->assertSame('admin', $rule->operatorArgument);
         $this->assertTrue($rule->actions['deny'] ?? false);
         $this->assertSame("Block, admin path", $rule->actions['msg'] ?? null);
-        $this->assertSame('attack,access', $rule->actions['tag'] ?? null);
+        $this->assertSame(['attack,access'], $rule->tags);
+        $this->assertArrayNotHasKey('tag', $rule->actions, 'Tags are collected as a list, not as a last-wins action');
     }
 
     public function testParsesMultipleVariablesAndIgnoresTransforms(): void
@@ -156,6 +157,75 @@ Rule_WRAP;
         $this->assertStringStartsWith('(?i)<\?', $rule->operatorArgument);
         $this->assertTrue($rule->actions['deny'] ?? false, 'block should map to deny');
         $this->assertSame('PHP Injection Attack: PHP Open Tag Found', $rule->actions['msg'] ?? null);
+        $this->assertSame('Matched Data: %{TX.0} found within %{MATCHED_VAR_NAME}: %{MATCHED_VAR}', $rule->actions['logdata'] ?? null);
+        $this->assertSame('CRITICAL', $rule->severity);
+        $this->assertSame(5, $rule->anomalyScore);
+        $this->assertSame(1, $rule->paranoiaLevel);
+        $this->assertSame([
+            'application-multi',
+            'language-php',
+            'platform-multi',
+            'attack-injection-php',
+            'paranoia-level/1',
+            'OWASP_CRS',
+            'OWASP_CRS/ATTACK-PHP',
+            'capec/1000/152/242',
+        ], $rule->tags);
+    }
+
+    public function testResolvesSeverityNamesCaseInsensitively(): void
+    {
+        $secRuleParser = new SecRuleParser();
+        $line = 'SecRule ARGS "@rx foo" "id:400,deny,severity:\'warning\'"';
+        $rule = $secRuleParser->parseLine($line);
+
+        $this->assertNotNull($rule);
+        $this->assertSame('WARNING', $rule->severity);
+        $this->assertSame(3, $rule->anomalyScore);
+    }
+
+    public function testResolvesNumericModSecuritySeverityLevels(): void
+    {
+        $secRuleParser = new SecRuleParser();
+        $line = 'SecRule ARGS "@rx foo" "id:401,deny,severity:4"';
+        $rule = $secRuleParser->parseLine($line);
+
+        $this->assertNotNull($rule);
+        $this->assertSame('WARNING', $rule->severity);
+        $this->assertSame(3, $rule->anomalyScore);
+    }
+
+    public function testMissingSeverityDefaultsToCriticalScore(): void
+    {
+        $secRuleParser = new SecRuleParser();
+        $line = 'SecRule ARGS "@rx foo" "id:402,deny"';
+        $rule = $secRuleParser->parseLine($line);
+
+        $this->assertNotNull($rule);
+        $this->assertNull($rule->severity);
+        $this->assertSame(5, $rule->anomalyScore);
+    }
+
+    public function testUnknownSeverityDefaultsToCriticalScore(): void
+    {
+        $secRuleParser = new SecRuleParser();
+        $line = 'SecRule ARGS "@rx foo" "id:403,deny,severity:\'FATAL\'"';
+        $rule = $secRuleParser->parseLine($line);
+
+        $this->assertNotNull($rule);
+        $this->assertNull($rule->severity);
+        $this->assertSame(5, $rule->anomalyScore);
+    }
+
+    public function testReadsParanoiaLevelFromTag(): void
+    {
+        $secRuleParser = new SecRuleParser();
+        $line = 'SecRule ARGS "@rx foo" "id:404,deny,tag:\'attack-sqli\',tag:\'paranoia-level/3\'"';
+        $rule = $secRuleParser->parseLine($line);
+
+        $this->assertNotNull($rule);
+        $this->assertSame(3, $rule->paranoiaLevel);
+        $this->assertSame(['attack-sqli', 'paranoia-level/3'], $rule->tags);
     }
 
     public function testUnterminatedQuoteInActionsSwallowsRemainderWithoutSplittingOnCommas(): void
