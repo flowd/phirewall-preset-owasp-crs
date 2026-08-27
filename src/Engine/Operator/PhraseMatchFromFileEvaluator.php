@@ -115,6 +115,11 @@ final readonly class PhraseMatchFromFileEvaluator implements DetailedOperatorEva
         $lines = preg_split('/\r?\n/', $content) ?: [];
         $phrases = [];
         foreach ($lines as $line) {
+            // @pmFromFile treats each line as one phrase (ModSecurity semantics), unlike the
+            // inline @pm operator whose argument is a whitespace/comma-separated list. A
+            // multi-word entry such as "Mozilla/5.0 (compatible; ...)" must stay a single
+            // phrase; splitting it would leave generic tokens (e.g. "Mozilla/5.0") that match
+            // legitimate traffic.
             $line = trim($line);
             if ($line === '') {
                 continue;
@@ -124,16 +129,12 @@ final readonly class PhraseMatchFromFileEvaluator implements DetailedOperatorEva
                 continue;
             }
 
-            // Allow comma/whitespace separated tokens per line using shared parser
-            foreach (PhraseListParser::parse($line) as $token) {
-                $token = trim($token);
-                if (!in_array($token, $phrases, true)) {
-                    $phrases[] = $token;
-                }
+            if (!in_array($line, $phrases, true)) {
+                $phrases[] = $line;
+            }
 
-                if (count($phrases) >= PhraseListParser::MAX_PHRASES) {
-                    break 2;
-                }
+            if (count($phrases) >= PhraseListParser::MAX_PHRASES) {
+                break;
             }
         }
 

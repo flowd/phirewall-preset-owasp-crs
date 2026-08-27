@@ -14,12 +14,15 @@ final class CoreRuleSetPmFromFileTest extends TestCase
     public function testPmFromFileHappyPathAndCaseInsensitive(): void
     {
         $root = vfsStream::setup('rules');
+        // Each non-comment line is one phrase (@pmFromFile / ModSecurity semantics).
         $content = <<<'TXT'
 # comment line
 
 admin
 SeCrEt
-alpha, beta ,  gamma
+alpha
+beta
+gamma
 TXT;
         vfsStream::newFile('phrases.txt')->at($root)->setContent($content);
 
@@ -102,5 +105,24 @@ TXT;
 
         $result = $set->evaluate(new ServerRequest('GET', '/?q=blocked-word'));
         $this->assertSame([730005], $result->matchedRuleIds());
+    }
+
+    public function testPmFromFileTreatsAMultiWordLineAsOnePhrase(): void
+    {
+        $root = vfsStream::setup('rules');
+        // A multi-word entry is a single phrase; splitting it on whitespace would leave
+        // a generic token like "Mozilla/5.0" that matches legitimate User-Agents.
+        vfsStream::newFile('scanners.data')->at($root)->setContent("Mozilla/5.0 (compatible; EvilScanner)\n");
+        $rulesText = 'SecRule REQUEST_HEADERS:User-Agent "@pmFromFile scanners.data" "id:730006,phase:1,deny"';
+        $set = SecRuleLoader::fromString($rulesText, $root->url());
+
+        // The whole phrase matches (case-insensitive, substring).
+        $this->assertSame([730006], $set->evaluate(
+            (new ServerRequest('GET', '/'))->withHeader('User-Agent', 'x MOZILLA/5.0 (compatible; evilscanner) y'),
+        )->matchedRuleIds());
+        // A normal browser sharing only the generic "Mozilla/5.0" prefix does NOT match.
+        $this->assertSame([], $set->evaluate(
+            (new ServerRequest('GET', '/'))->withHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64) Chrome/120'),
+        )->matchedRuleIds());
     }
 }
