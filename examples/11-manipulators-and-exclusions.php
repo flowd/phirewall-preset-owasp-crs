@@ -54,13 +54,15 @@ $plain = new Firewall((new Config(new InMemoryCache()))->with(Presets::blocklist
 
 $tuned = new Firewall((new Config(new InMemoryCache()))->with(Presets::blocklist(
     ParanoiaLevel::Level1,
-    configure: static fn(CoreRuleSetMatcher $coreRuleSetMatcher): \Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSetMatcher => $coreRuleSetMatcher->excludeTarget('ARGS:/^utm_/'),
+    configure: static function (CoreRuleSetMatcher $coreRuleSetMatcher): void {
+        $coreRuleSetMatcher->excludeTarget('ARGS:/^utm_/');
+    },
 )));
 
 echo "Target exclusion (ARGS:/^utm_/):\n";
 $assert('payload in utm_campaign, no tuning', $isBlocked($plain, $queryRequest(['utm_campaign' => $sqlInjection])), true);
 $assert('payload in utm_campaign, excluded', $isBlocked($tuned, $queryRequest(['utm_campaign' => $sqlInjection])), false);
-$assert('payload in q, excluded (still inspected)', $isBlocked($tuned, $queryRequest(['q' => $sqlInjection])), true);
+$assert('payload in q, not excluded (still inspected)', $isBlocked($tuned, $queryRequest(['q' => $sqlInjection])), true);
 
 // --- Manipulator (advanced escape hatch) -----------------------------------
 $stripPhpTagsOnSnippet = static function (string $variable, ?string $name, string $value): string {
@@ -73,7 +75,9 @@ $stripPhpTagsOnSnippet = static function (string $variable, ?string $name, strin
 
 $pasteBoard = new Firewall((new Config(new InMemoryCache()))->with(Presets::blocklist(
     ParanoiaLevel::Level1,
-    configure: static fn(CoreRuleSetMatcher $coreRuleSetMatcher): \Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSetMatcher => $coreRuleSetMatcher->addManipulator($stripPhpTagsOnSnippet),
+    configure: static function (CoreRuleSetMatcher $coreRuleSetMatcher) use ($stripPhpTagsOnSnippet): void {
+        $coreRuleSetMatcher->addManipulator($stripPhpTagsOnSnippet);
+    },
 )));
 
 $snippetRequest = static fn(string $snippet): ServerRequest => (new ServerRequest('GET', 'https://forum.example/paste'))
