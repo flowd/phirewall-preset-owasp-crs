@@ -94,9 +94,12 @@ final class BenignRequestsTest extends TestCase
                 continue;
             }
 
+            // Evaluate exhaustively so a regression's failure message lists every
+            // matched rule, not only those seen before the threshold short-circuit.
             $evaluation = $this->ruleSetFor($paranoiaLevel)->evaluate(
                 $this->buildRequest($entry),
                 CoreRuleSet::DEFAULT_ANOMALY_THRESHOLD,
+                stopWhenThresholdReached: false,
             );
 
             $this->assertFalse(
