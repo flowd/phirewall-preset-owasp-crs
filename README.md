@@ -273,6 +273,10 @@ process therefore ships only the CRS rules that the engine can evaluate faithful
 
 Further engine differences to be aware of:
 
+- **Bodies are inspected only as parsed arguments.** Query and form parameters are
+  examined as `ARGS`; the engine does not parse raw JSON/XML bodies or inspect
+  uploaded files (no `REQUEST_BODY`/`XML`/`FILES` collection), so a payload that
+  appears only there is not seen.
 - **No transformations.** `t:lowercase`, `t:urlDecodeUni` and friends are ignored;
   rules are evaluated against the raw collected values. As one deliberate exception,
   the string operators (`@streq`, `@contains`, `@beginsWith`, `@endsWith`) fold case,
@@ -339,6 +343,29 @@ php tools/generate-rule-payloads.php
 The generator derives a triggering payload for each rule from its own operator
 (sampling the `@rx` regex, picking phrases for `@pm`/`@pmFromFile`) and only keeps
 payloads it has verified fire the rule in isolation.
+
+## Versioning
+
+This package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+It is still pre-1.0, so per the SemVer 0.x rules a breaking change may land in a
+minor release; every such change is called out in `CHANGELOG.md`.
+
+A change is breaking when it alters either:
+
+- the **public PHP API** (the `Presets`, `ParanoiaLevel`, `CoreRuleSet`,
+  `CoreRuleSetMatcher`, `SecRuleLoader` and related engine types), or
+- the **engine behavior** - anomaly scoring, the default threshold, severity
+  mapping or how rules are evaluated.
+
+The bundled OWASP CRS rules are data, not API: updates to them ride in **minor
+or patch** releases without counting as breaking, even though a new or revised
+rule **can change which requests are blocked** (traffic that previously passed
+may now match, and vice versa). Rule updates are always recorded in
+`CHANGELOG.md`, so review it before upgrading. `Presets::crsVersion()` reports
+the bundled upstream release tag.
+
+Supported PHP versions: `>=8.2`, tested on 8.2, 8.3, 8.4 and 8.5. Security fixes
+are provided for the latest minor release only (see `SECURITY.md`).
 
 ## License
 
