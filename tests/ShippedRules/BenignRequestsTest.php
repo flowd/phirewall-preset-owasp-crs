@@ -26,11 +26,30 @@ use Psr\Http\Message\ServerRequestInterface;
  */
 final class BenignRequestsTest extends TestCase
 {
+    /** @var array<int, CoreRuleSet> */
+    private static array $ruleSetsByParanoiaLevel = [];
+
     protected function setUp(): void
     {
         if (!is_file(RuleSetLoader::defaultRulesDirectory() . '/manifest.json')) {
             self::markTestSkipped('No imported CRS rules present. Run bin/crs-import first.');
         }
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        self::$ruleSetsByParanoiaLevel = [];
+    }
+
+    /**
+     * Loading and parsing every rule file is expensive, so the corpus reuses one
+     * rule set per paranoia level across all entries. The rule set is stateless per
+     * request here (no exclusions or manipulators are configured), so it is safe to
+     * share.
+     */
+    private function ruleSetFor(ParanoiaLevel $paranoiaLevel): CoreRuleSet
+    {
+        return self::$ruleSetsByParanoiaLevel[$paranoiaLevel->value] ??= Presets::coreRuleSet($paranoiaLevel);
     }
 
     /**
@@ -57,12 +76,25 @@ final class BenignRequestsTest extends TestCase
     #[DataProvider('benignRequestProvider')]
     public function testBenignRequestStaysCleanUpToItsParanoiaLevel(array $entry): void
     {
+        $validParanoiaLevels = array_map(static fn(ParanoiaLevel $paranoiaLevel): int => $paranoiaLevel->value, ParanoiaLevel::cases());
+        $this->assertContains(
+            $entry['maxCleanParanoiaLevel'],
+            $validParanoiaLevels,
+            sprintf(
+                'Corpus entry "%s" declares maxCleanParanoiaLevel %d, outside the valid range %d..%d; the entry would be silently untested.',
+                $entry['label'],
+                $entry['maxCleanParanoiaLevel'],
+                min($validParanoiaLevels),
+                max($validParanoiaLevels),
+            ),
+        );
+
         foreach (ParanoiaLevel::cases() as $paranoiaLevel) {
             if ($paranoiaLevel->value > $entry['maxCleanParanoiaLevel']) {
                 continue;
             }
 
-            $evaluation = Presets::coreRuleSet($paranoiaLevel)->evaluate(
+            $evaluation = $this->ruleSetFor($paranoiaLevel)->evaluate(
                 $this->buildRequest($entry),
                 CoreRuleSet::DEFAULT_ANOMALY_THRESHOLD,
             );
