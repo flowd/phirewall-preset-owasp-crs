@@ -1,0 +1,50 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * Regenerates tests/ShippedRules/rule-inventory.snapshot.json from the currently
+ * shipped rules. Run after a reviewed CRS import so the diff gate
+ * (AttackRequestsTest / RuleInventoryDiffGateTest) tracks the new inventory:
+ *
+ *   bin/rule-inventory-snapshot
+ *
+ * The snapshot records, per paranoia level, the rule ids introduced at that
+ * level plus the manifest's aggregate severity counts. It is derived entirely
+ * from the public API, so it adds no runtime surface.
+ */
+
+declare(strict_types=1);
+
+use Flowd\PhirewallPresetOwaspCrs\RuleSetLoader;
+use Flowd\PhirewallPresetOwaspCrs\Tests\ShippedRules\RuleInventorySnapshot;
+
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+
+foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php'] as $autoloadFile) {
+    if (is_file($autoloadFile)) {
+        require $autoloadFile;
+        break;
+    }
+}
+
+if (!class_exists(RuleInventorySnapshot::class)) {
+    fwrite(STDERR, "Autoloader not found (dev dependencies required). Run \"composer install\" first.\n");
+    exit(1);
+}
+
+if (!is_file(RuleSetLoader::defaultRulesDirectory() . '/manifest.json')) {
+    fwrite(STDERR, "No imported CRS rules present. Run bin/crs-import first.\n");
+    exit(1);
+}
+
+$inventory = RuleInventorySnapshot::current();
+RuleInventorySnapshot::write($inventory);
+
+$ruleCount = array_sum(array_map('count', $inventory['rulesByParanoiaLevel']));
+printf(
+    "Wrote %s (CRS %s, %d rules).\n",
+    RuleInventorySnapshot::snapshotPath(),
+    $inventory['crsVersion'],
+    $ruleCount,
+);
