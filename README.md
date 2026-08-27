@@ -106,7 +106,7 @@ Details:
   `stopWhenThresholdReached: false` to evaluate every rule for complete diagnostics.
 - Fail-closed decisions bypass the threshold: a variable truncated at the collection
   cap, a single value longer than the per-value inspection limit (2048 bytes,
-  configurable via `CoreRuleSet::setMaxInspectableValueLength()`), or a PCRE engine
+  configurable via `CoreRuleSet::setMaxInspectableValueLength()`), or a PCRE subject
   error on a value blocks immediately, whatever the score.
 - An *unexpected* engine fault (e.g. a manipulator that throws) follows the firewall's
   fail-open policy: the request is allowed under the default fail-open (with a
