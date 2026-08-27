@@ -321,3 +321,8 @@ echo "XSS attacks blocked: " . ($counters['blocklisted']['total'] ?? 0) . "\n";
 echo "Safe requests allowed: " . ($counters['passed']['total'] ?? 0) . "\n";
 
 echo "\n=== Example Complete ===\n";
+
+// Fail the build (CI runs each example) when any assertion did not hold.
+if ($failed > 0) {
+    exit(1);
+}
