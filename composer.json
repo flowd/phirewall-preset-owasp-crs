@@ -52,6 +52,7 @@
     "cs:check": "vendor/bin/php-cs-fixer fix --diff --dry-run --verbose",
     "cs:fix": "vendor/bin/php-cs-fixer fix --diff --verbose",
     "crs:import": "@php bin/crs-import",
+    "infection": "XDEBUG_MODE=coverage vendor/bin/infection --threads=max --show-mutations",
     "test:phpt": "XDEBUG_MODE=off vendor/bin/phpunit --testsuite Integration --no-coverage",
     "fix": [
       "@rector:fix",

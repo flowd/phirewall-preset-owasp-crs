@@ -1,0 +1,23 @@
+{
+    // Infection is intentionally NOT in require-dev so the composer setup stays
+    // untouched. Install it once locally to calibrate:
+    //   composer require --dev "infection/infection:^0.29"
+    //   composer infection
+    "$schema": "vendor/infection/infection/resources/schema.json",
+    "source": {
+        "directories": ["src"]
+    },
+    "mutators": {
+        "@default": true
+    },
+    // Per-mutant process timeout in seconds; a small multiple of the suite runtime.
+    "timeout": 30,
+    // Keep scratch data under the already-gitignored .build/ directory.
+    "tmpDir": ".build/infection",
+    "logs": {
+        "text": ".build/infection.log",
+        "summary": ".build/infection-summary.log"
+    }
+    // minMsi / minCoveredMsi are deliberately omitted: the maintainer sets the
+    // gate after the first `composer infection` run reports the real baseline.
+}
