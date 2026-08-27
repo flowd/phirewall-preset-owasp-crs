@@ -76,7 +76,10 @@ final class RuleInventorySnapshot
      */
     public static function write(array $inventory): void
     {
-        file_put_contents(self::snapshotPath(), self::toJson($inventory));
+        $path = self::snapshotPath();
+        if (file_put_contents($path, self::toJson($inventory), LOCK_EX) === false) {
+            throw new \RuntimeException('Failed to write rule inventory snapshot: ' . $path);
+        }
     }
 
     /**
