@@ -265,3 +265,8 @@ echo "Blocked requests: " . ($counters['blocklisted']['total'] ?? 0) . "\n";
 echo "Passed requests: " . ($counters['passed']['total'] ?? 0) . "\n";
 
 echo "\n=== Example Complete ===\n";
+
+// Fail the build (CI runs each example) when any assertion did not hold.
+if ($failed > 0) {
+    exit(1);
+}

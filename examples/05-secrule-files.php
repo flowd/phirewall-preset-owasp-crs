@@ -197,3 +197,8 @@ echo "  @streq  - Exact match (case-insensitive)\n";
 echo "  @contains - Substring match\n";
 
 echo "\n=== Example Complete ===\n";
+
+// Fail the build (CI runs each example) when any assertion did not hold.
+if ($failed > 0) {
+    exit(1);
+}
