@@ -105,18 +105,28 @@ Details:
 - Evaluation stops once the threshold is reached. `CoreRuleSet::evaluate()` accepts
   `stopWhenThresholdReached: false` to evaluate every rule for complete diagnostics.
 - Fail-closed decisions bypass the threshold: a variable truncated at the collection
-  cap or a PCRE engine error on a value blocks immediately, whatever the score.
+  cap, a single value longer than the per-value inspection limit (2048 bytes,
+  configurable via `CoreRuleSet::setMaxInspectableValueLength()`), or a PCRE engine
+  error on a value blocks immediately, whatever the score.
+- An *unexpected* engine fault (e.g. a manipulator that throws) follows the firewall's
+  fail-open policy: the request is allowed under the default fail-open (with a
+  `FirewallError` event) and blocked when fail-open is disabled - the matcher is
+  `FailOpenAware`.
 - Scores never accumulate across requests. The fail2ban preset counts a request
   toward the ban whenever CRS blocks it - when its score reaches the threshold or
   the request fails closed.
 
-A blocked request's `MatchResult` metadata always carries `owasp_anomaly_score`,
-`owasp_anomaly_threshold`, `owasp_rule_ids` (comma-separated) and `owasp_rule_id`
-(first match); it also carries `msg` and `owasp_log_data` when the first matching
-rule provides them, and `owasp_fail_closed` on a fail-closed block.
-With `Config::enableDiagnosticsHeaders()` blocked responses carry
+A request blocked on its anomaly score - or by a rule-level fail-closed outcome (a
+capped variable, an oversized value, or a PCRE subject error) - carries
+`owasp_anomaly_score`, `owasp_anomaly_threshold`, `owasp_rule_ids` (comma-separated)
+and `owasp_rule_id` (first match); it also carries `msg` and `owasp_log_data` when the
+first matching rule provides them, and `owasp_fail_closed` on a fail-closed block.
+With `Config::enableDiagnosticsHeaders()` such blocked responses carry
 `X-Phirewall-Owasp-Rule` (up to 10 rule ids, then `,+N`) and
-`X-Phirewall-Owasp-Score` (`score/threshold`).
+`X-Phirewall-Owasp-Score` (`score/threshold`). A block from an engine-internal fault
+under a fail-closed policy (`useFailOpen(false)`) instead carries only
+`owasp_anomaly_threshold` and `owasp_fail_closed` - no scoring metadata or diagnostics
+headers, since no rule scored.
 
 ### Excluding parameters from rules (false positives)
 
@@ -195,7 +205,10 @@ template expanded with the matched data (`%{TX.0}`, `%{MATCHED_VAR_NAME}`,
 `anomaly_threshold`, `rule_ids`, `fail_closed`, `method` and `path`.
 Attacker-controlled context values (`matched_variable`, `path`, `log_data`)
 are sanitized (control characters stripped) and length-bounded before they
-reach the log line.
+reach the log line. When the matched target is a credential - a cookie or an
+`Authorization`, `Cookie`, `Proxy-Authorization`, `X-Api-Key` or `X-Auth-Token`
+header - its value (and captures) is replaced with `[redacted]` in both
+`log_data` and the `owasp_log_data` metadata; the target name is kept for tuning.
 
 ### Using the SecRule engine directly
 
@@ -234,7 +247,7 @@ positives you find, then raise the level.
 Parsing the CRS rule files costs several milliseconds and, under PHP-FPM, would
 run on every request. Both presets therefore load lazily: the parse happens on
 the first evaluated request. To also skip that first parse per process, give
-your `Config` a compiled-data cache (phirewall `^0.9`) - the parsed rules are
+your `Config` a compiled-data cache (phirewall 0.9 or newer) - the parsed rules are
 then served from an OPcache-backed artifact and re-parsed only when a rule file
 changes:
 
@@ -299,14 +312,19 @@ deployment of the CRS.
 ## Updating the bundled rules
 
 ```bash
-bin/crs-import                 # import the latest upstream release
-bin/crs-import --tag=v4.16.0   # import a specific release
-bin/crs-import --source=/path/to/coreruleset --tag=v4.16.0   # offline, from a local checkout
+bin/crs-import --tag=v4.29.0                  # import a specific release (reproducible; preferred)
+bin/crs-import --tag=v4.29.0 --sha256=<hex>   # additionally verify the tarball against a pinned hash
+bin/crs-import                                # import the latest upstream release (warns: not reproducible)
+bin/crs-import --source=/path/to/coreruleset --tag=v4.29.0   # offline, from a local checkout
 ```
 
 The command downloads the release tarball, filters the rules as described above,
 splits them per paranoia level into `resources/rules/*.plN.conf`, copies referenced
-`.data` files and writes `manifest.json`.
+`.data` files and writes `manifest.json`. Prefer an explicit `--tag`; a bare import of
+"latest" warns because it is not reproducible. `--sha256` verifies the downloaded
+tarball before extraction (the computed hash is always printed so it can be pinned),
+and `GITHUB_TOKEN`, if set, is sent only to the GitHub API, never with the tarball
+download.
 
 The scheduled `CRS Update` GitHub Actions workflow runs the import weekly and opens a
 pull request when a new CRS release was imported. The test suite runs in that pull
