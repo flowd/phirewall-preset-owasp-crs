@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace Flowd\PhirewallPresetOwaspCrs\Engine\Operator;
 
 /**
- * Parses phrase lists used by @pm and @pmFromFile operators.
- * Supports quotes (single/double) and backslash escapes. Separators: whitespace and commas.
+ * Parses the inline phrase list of the @pm operator (a whitespace/comma-separated
+ * argument). Supports quotes (single/double) and backslash escapes.
+ *
+ * @pmFromFile does NOT use this: a data file is one phrase per line (ModSecurity
+ * semantics), so {@see PhraseMatchFromFileEvaluator} reads each line whole.
  */
 final class PhraseListParser
 {
