@@ -1,0 +1,41 @@
+name: Mutation Testing
+
+# Runs Infection on a schedule only, kept out of ci.yml so it never blocks PRs.
+on:
+  schedule:
+    # Sundays at 03:30 UTC
+    - cron: '30 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  infection:
+    name: Infection (PHP 8.3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+          extensions: mbstring, json
+          coverage: xdebug
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      # Infection is installed ad-hoc here (not in require-dev) so the committed
+      # composer setup stays untouched. This only mutates the runner's ephemeral
+      # composer.json/lock, which is never committed.
+      - name: Install Infection
+        run: composer require --dev "infection/infection:^0.29" --no-interaction --with-all-dependencies
+
+      - name: Run Infection
+        run: composer infection
