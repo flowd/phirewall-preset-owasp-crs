@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-_Nothing yet._
+### Fixed
+
+- The scheduled `CRS Update` workflow no longer opens a pull request when the latest CRS release is already imported: it compares the release tag against the manifest's `crsVersion` before importing, so timestamp-only update PRs are gone. A manually dispatched run with an explicit tag still re-imports unconditionally.
 
 ## 0.5.0 - 2026-08-27
 

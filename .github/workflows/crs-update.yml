@@ -24,7 +24,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # An explicitly requested tag skips the up-to-date check: a manual
+      # dispatch may deliberately re-import the current version, e.g. after
+      # an import filter change.
+      - name: Check whether the latest release is already imported
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -n "$REQUESTED_TAG" ]; then
+            echo "up_to_date=false" >> "$GITHUB_OUTPUT"
+            echo "Importing the explicitly requested tag unconditionally."
+            exit 0
+          fi
+          latest="$(gh api repos/coreruleset/coreruleset/releases/latest --jq .tag_name)"
+          imported="$(jq -r '.crsVersion // ""' resources/rules/manifest.json)"
+          echo "Latest release: $latest, imported: $imported"
+          if [ -n "$latest" ] && [ "$latest" = "$imported" ]; then
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+            echo "Already at $imported; skipping the import." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "up_to_date=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup PHP
+        if: steps.gate.outputs.up_to_date != 'true'
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
@@ -32,9 +57,11 @@ jobs:
           coverage: none
 
       - name: Install dependencies
+        if: steps.gate.outputs.up_to_date != 'true'
         run: composer install --prefer-dist --no-progress --no-interaction
 
       - name: Import CRS rules
+        if: steps.gate.outputs.up_to_date != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REQUESTED_TAG: ${{ inputs.tag }}
@@ -47,6 +74,7 @@ jobs:
 
       - name: Read imported CRS version
         id: manifest
+        if: steps.gate.outputs.up_to_date != 'true'
         run: |
           echo "version=$(php -r 'echo json_decode(file_get_contents("resources/rules/manifest.json"), true)["crsVersion"];')" >> "$GITHUB_OUTPUT"
 
@@ -54,6 +82,7 @@ jobs:
       # request, where the required "CI passed" check gates the merge. Running it here
       # would abort the job on a failure and the update would never surface as a PR.
       - name: Create pull request
+        if: steps.gate.outputs.up_to_date != 'true'
         uses: peter-evans/create-pull-request@v7
         with:
           branch: crs-update/${{ steps.manifest.outputs.version }}
