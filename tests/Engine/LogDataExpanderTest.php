@@ -167,4 +167,42 @@ final class LogDataExpanderTest extends TestCase
 
         $this->assertSame('value|capture', LogDataExpander::expand('%{MATCHED_VAR}|%{TX.0}', $result));
     }
+
+    #[DataProvider('nonSensitiveTargetProvider')]
+    public function testMatchedValueForLogKeepsNonCredentialValuesReadable(string $matchedVariableName, string $value): void
+    {
+        $this->assertSame($value, LogDataExpander::matchedValueForLog($matchedVariableName, $value));
+    }
+
+    #[DataProvider('sensitiveHeaderTargetProvider')]
+    public function testMatchedValueForLogRedactsCredentialTargets(string $matchedVariableName): void
+    {
+        $this->assertSame(
+            LogDataExpander::REDACTED_PLACEHOLDER,
+            LogDataExpander::matchedValueForLog($matchedVariableName, 'Bearer super-secret-token'),
+        );
+    }
+
+    public function testMatchedValueForLogRedactsCookieValues(): void
+    {
+        $this->assertSame(
+            LogDataExpander::REDACTED_PLACEHOLDER,
+            LogDataExpander::matchedValueForLog('REQUEST_COOKIES:session', 'super-secret-session-token'),
+        );
+    }
+
+    public function testMatchedValueForLogReturnsNullForNullValue(): void
+    {
+        $this->assertNull(LogDataExpander::matchedValueForLog('ARGS:q', null));
+    }
+
+    public function testMatchedValueForLogSanitizesAndBoundsTheValue(): void
+    {
+        $sanitized = LogDataExpander::matchedValueForLog('ARGS:q', "line\r\nbreak" . str_repeat('x', 300));
+
+        $this->assertIsString($sanitized);
+        $this->assertStringNotContainsString("\n", $sanitized);
+        $this->assertStringStartsWith('line  break', $sanitized);
+        $this->assertSame(LogDataExpander::MAX_MATCHED_VALUE_LENGTH, strlen($sanitized));
+    }
 }

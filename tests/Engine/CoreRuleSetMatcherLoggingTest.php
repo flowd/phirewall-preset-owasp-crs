@@ -73,6 +73,7 @@ final class CoreRuleSetMatcherLoggingTest extends TestCase
         $this->assertSame(942100, $ruleRecord['context']['rule_id']);
         $this->assertSame('CRITICAL', $ruleRecord['context']['severity']);
         $this->assertSame('ARGS:q', $ruleRecord['context']['matched_variable']);
+        $this->assertSame('1 union select 2', $ruleRecord['context']['matched_value']);
         $this->assertSame(
             'Matched Data: union select found within ARGS:q: 1 union select 2',
             $ruleRecord['context']['log_data'],
@@ -158,6 +159,7 @@ final class CoreRuleSetMatcherLoggingTest extends TestCase
         $context = $logger->records[0]['context'];
         // The target name identifies the parameter for tuning; the value and capture are redacted.
         $this->assertSame('REQUEST_COOKIES:session', $context['matched_variable']);
+        $this->assertSame(LogDataExpander::REDACTED_PLACEHOLDER, $context['matched_value']);
         $this->assertIsString($context['log_data']);
         $this->assertStringNotContainsString($secretCookieValue, $context['log_data']);
         $this->assertStringNotContainsString('union select', $context['log_data']);
