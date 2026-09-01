@@ -260,6 +260,8 @@ final class CoreRuleSet
             $logData,
             $coreRuleResult->matchedVariableName,
             $coreRuleResult->outcome === RuleOutcome::FailClosed,
+            // Redact and sanitize here so the raw value never leaves the evaluation.
+            LogDataExpander::matchedValueForLog($coreRuleResult->matchedVariableName, $coreRuleResult->matchedValue),
         );
     }
 

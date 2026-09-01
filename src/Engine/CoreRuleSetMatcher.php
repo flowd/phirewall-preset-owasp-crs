@@ -162,6 +162,17 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
             $meta['msg'] = $firstMatch->message;
         }
 
+        // The matched target label (e.g. REQUEST_HEADERS:User-Agent) carries an
+        // attacker-controlled member name: sanitize it like the PSR-3 log context.
+        if ($firstMatch->matchedVariableName !== null) {
+            $meta['owasp_matched_variable'] = LogDataExpander::sanitize($firstMatch->matchedVariableName);
+        }
+
+        // Already log-safe: sanitized, length-bounded and redacted for credential targets.
+        if ($firstMatch->matchedValue !== null) {
+            $meta['owasp_matched_value'] = $firstMatch->matchedValue;
+        }
+
         if ($firstMatch->logData !== null) {
             $meta['owasp_log_data'] = $firstMatch->logData;
         }
@@ -330,7 +341,8 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
         // method, path and matched_variable all carry attacker-controlled input
         // (request line, URI, member name): sanitize each like log_data (control
         // characters, length bound) so a crafted request cannot inject or inflate
-        // log lines.
+        // log lines. matched_value and log_data arrive already log-safe from the
+        // rule match: sanitized, length-bounded and redacted for credential targets.
         $method = LogDataExpander::sanitize($serverRequest->getMethod());
         $path = LogDataExpander::sanitize($serverRequest->getUri()->getPath(), LogDataExpander::MAX_RESULT_LENGTH);
 
@@ -343,6 +355,7 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
                 'matched_variable' => $ruleMatch->matchedVariableName !== null
                     ? LogDataExpander::sanitize($ruleMatch->matchedVariableName)
                     : null,
+                'matched_value' => $ruleMatch->matchedValue,
                 'log_data' => $ruleMatch->logData,
                 'msg' => $ruleMatch->message,
                 'fail_closed' => $ruleMatch->failClosed,

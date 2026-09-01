@@ -51,6 +51,25 @@ final class LogDataExpander
     }
 
     /**
+     * The matched value as it may reach a log sink or match metadata: redacted
+     * when the target carries a credential (cookie values, credential-bearing
+     * request headers), otherwise sanitized and length-bounded but readable, so
+     * the match can be understood and tuned.
+     */
+    public static function matchedValueForLog(?string $matchedVariableName, ?string $matchedValue): ?string
+    {
+        if ($matchedValue === null) {
+            return null;
+        }
+
+        if (self::targetCarriesCredential($matchedVariableName)) {
+            return self::REDACTED_PLACEHOLDER;
+        }
+
+        return self::sanitize($matchedValue, self::MAX_MATCHED_VALUE_LENGTH);
+    }
+
+    /**
      * Make an attacker-controlled value safe for a log line: control characters
      * (CR/LF/NUL etc.) become spaces and the result is length-bounded.
      */
