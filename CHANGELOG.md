@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `MatchResult` metadata carries `owasp_matched_variable` and `owasp_matched_value`: the target the first matching rule fired on (e.g. `REQUEST_HEADERS:User-Agent`, member name in the client's casing) and the value that triggered it - readable so the match can be understood, sanitized and length-bounded, `[redacted]` for credential targets (cookie values, `Authorization`-type headers). On a fail-closed block `owasp_matched_variable` names the variable that failed closed. The PSR-3 per-match log context gains the same `matched_value`.
 
+### Fixed
+
+- The scheduled `CRS Update` workflow no longer opens a pull request when the latest CRS release is already imported: it compares the release tag against the manifest's `crsVersion` before importing, so timestamp-only update PRs are gone. A manually dispatched run with an explicit tag still re-imports unconditionally.
+
 ## 0.5.0 - 2026-08-27
 
 ### Added
