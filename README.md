@@ -119,8 +119,14 @@ Details:
 A request blocked on its anomaly score - or by a rule-level fail-closed outcome (a
 capped variable, an oversized value, or a PCRE subject error) - carries
 `owasp_anomaly_score`, `owasp_anomaly_threshold`, `owasp_rule_ids` (comma-separated)
-and `owasp_rule_id` (first match); it also carries `msg` and `owasp_log_data` when the
-first matching rule provides them, and `owasp_fail_closed` on a fail-closed block.
+and `owasp_rule_id` (first match); it also carries `msg`, `owasp_matched_variable`
+(the matched target, e.g. `REQUEST_HEADERS:User-Agent` - the member name keeps the
+casing the client sent), `owasp_matched_value` (the value the rule fired on, readable
+so the match can be understood; sanitized, length-bounded and `[redacted]` for
+credential targets such as cookie values and `Authorization`-type headers) and
+`owasp_log_data` when the first matching rule provides them, and `owasp_fail_closed`
+on a fail-closed block (there `owasp_matched_variable` names the variable that
+failed closed).
 With `Config::enableDiagnosticsHeaders()` such blocked responses carry
 `X-Phirewall-Owasp-Rule` (up to 10 rule ids, then `,+N`) and
 `X-Phirewall-Owasp-Score` (`score/threshold`). A block from an engine-internal fault
@@ -198,17 +204,19 @@ Blocked requests additionally log a `warning` with the total score, threshold
 and all matched rule ids.
 
 The per-match log context carries `rule_id`, `severity`, `anomaly_score`,
-`paranoia_level`, `matched_variable` (e.g. `ARGS:utm_content`), `msg`,
+`paranoia_level`, `matched_variable` (e.g. `ARGS:utm_content`), `matched_value`
+(the value the rule fired on; `[redacted]` for credential targets), `msg`,
 `fail_closed`, `method`, `path` and `log_data` - the rule's CRS `logdata:`
 template expanded with the matched data (`%{TX.0}`, `%{MATCHED_VAR_NAME}`,
 `%{MATCHED_VAR}`); the warning context carries `total_score`,
 `anomaly_threshold`, `rule_ids`, `fail_closed`, `method` and `path`.
-Attacker-controlled context values (`matched_variable`, `path`, `log_data`)
-are sanitized (control characters stripped) and length-bounded before they
-reach the log line. When the matched target is a credential - a cookie or an
+Attacker-controlled context values (`matched_variable`, `matched_value`, `path`,
+`log_data`) are sanitized (control characters stripped) and length-bounded before
+they reach the log line. When the matched target is a credential - a cookie or an
 `Authorization`, `Cookie`, `Proxy-Authorization`, `X-Api-Key` or `X-Auth-Token`
-header - its value (and captures) is replaced with `[redacted]` in both
-`log_data` and the `owasp_log_data` metadata; the target name is kept for tuning.
+header - its value (and captures) is replaced with `[redacted]` in `matched_value`,
+`log_data` and the `owasp_log_data`/`owasp_matched_value` metadata; the target name
+is kept for tuning.
 
 ### Using the SecRule engine directly
 
