@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+_Nothing yet._
+
+## 0.5.1 - 2026-09-01
+
 ### Added
 
 - `MatchResult` metadata carries `owasp_matched_variable` and `owasp_matched_value`: the target the first matching rule fired on (e.g. `REQUEST_HEADERS:User-Agent`, member name in the client's casing) and the value that triggered it - readable so the match can be understood, sanitized and length-bounded, `[redacted]` for credential targets (cookie values, `Authorization`-type headers). On a fail-closed block `owasp_matched_variable` names the variable that failed closed. The PSR-3 per-match log context gains the same `matched_value`.
