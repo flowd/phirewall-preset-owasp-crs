@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Flowd\PhirewallPresetOwaspCrs\Engine;
 
 use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\RequestValueManipulatorInterface;
-use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\TargetSelector;
+use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\TargetExclusion;
 
 /**
  * Runtime tuning configuration of a rule set: target exclusions and value
@@ -18,16 +18,16 @@ use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\TargetSelector;
  */
 final class RuleTargetConfig
 {
-    /** @var array<string, list<TargetSelector>> */
+    /** @var array<string, list<TargetExclusion>> */
     private array $globalExclusionsByVariable = [];
 
     /** @var list<RequestValueManipulatorInterface> */
     private array $globalManipulators = [];
 
-    /** @var array<int, array<string, list<TargetSelector>>> */
+    /** @var array<int, array<string, list<TargetExclusion>>> */
     private array $exclusionsByRuleId = [];
 
-    /** @var array<string, array<string, list<TargetSelector>>> */
+    /** @var array<string, array<string, list<TargetExclusion>>> */
     private array $exclusionsByTag = [];
 
     /** @var array<int, list<RequestValueManipulatorInterface>> */
@@ -49,21 +49,21 @@ final class RuleTargetConfig
             && $this->manipulatorsByRuleId === [];
     }
 
-    public function excludeTarget(TargetSelector $targetSelector): void
+    public function excludeTarget(TargetExclusion $targetExclusion): void
     {
-        $this->globalExclusionsByVariable[$targetSelector->variable][] = $targetSelector;
+        $this->globalExclusionsByVariable[$targetExclusion->selector->variable][] = $targetExclusion;
         $this->invalidate();
     }
 
-    public function excludeTargetById(int $ruleId, TargetSelector $targetSelector): void
+    public function excludeTargetById(int $ruleId, TargetExclusion $targetExclusion): void
     {
-        $this->exclusionsByRuleId[$ruleId][$targetSelector->variable][] = $targetSelector;
+        $this->exclusionsByRuleId[$ruleId][$targetExclusion->selector->variable][] = $targetExclusion;
         $this->invalidate();
     }
 
-    public function excludeTargetByTag(string $tag, TargetSelector $targetSelector): void
+    public function excludeTargetByTag(string $tag, TargetExclusion $targetExclusion): void
     {
-        $this->exclusionsByTag[$tag][$targetSelector->variable][] = $targetSelector;
+        $this->exclusionsByTag[$tag][$targetExclusion->selector->variable][] = $targetExclusion;
         $this->invalidate();
     }
 
@@ -101,9 +101,9 @@ final class RuleTargetConfig
 
         $exclusionsByVariable = $this->exclusionsByRuleId[$coreRule->id] ?? [];
         foreach ($coreRule->tags as $tag) {
-            foreach ($this->exclusionsByTag[$tag] ?? [] as $variable => $selectors) {
-                foreach ($selectors as $selector) {
-                    $exclusionsByVariable[$variable][] = $selector;
+            foreach ($this->exclusionsByTag[$tag] ?? [] as $variable => $exclusions) {
+                foreach ($exclusions as $exclusion) {
+                    $exclusionsByVariable[$variable][] = $exclusion;
                 }
             }
         }

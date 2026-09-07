@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Flowd\PhirewallPresetOwaspCrs\Engine;
 
 use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\RequestValueManipulatorInterface;
-use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\TargetSelector;
+use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\TargetExclusion;
 
 /**
  * Immutable set of target exclusions and manipulators applied to collected
@@ -15,7 +15,7 @@ use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\TargetSelector;
 final readonly class RuleTargetFilter
 {
     /**
-     * @param array<string, list<TargetSelector>> $exclusionsByVariable
+     * @param array<string, list<TargetExclusion>> $exclusionsByVariable
      * @param list<RequestValueManipulatorInterface> $manipulators
      */
     public function __construct(
@@ -46,7 +46,7 @@ final readonly class RuleTargetFilter
         $result = [];
         foreach ($entries as $entry) {
             foreach ($exclusions as $exclusion) {
-                if ($exclusion->matchesName($entry['name'])) {
+                if ($exclusion->excludes($entry['name'], $entry['value'])) {
                     continue 2;
                 }
             }

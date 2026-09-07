@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-_Nothing yet._
+### Added
+
+- **Conditional target exclusions.** Every `excludeTarget*` method on `CoreRuleSet` and `CoreRuleSetMatcher` accepts a `when:` condition (`TargetExclusionConditionInterface` or a closure `fn (string $value, ?string $name, string $variable): bool`): the selected entry is only excluded while the condition approves its value - e.g. skip SQLi inspection of `ARGS:token` only when the value is a signature-verified JWT. The condition runs only for entries the selector matches; exceptions it throws propagate like manipulator exceptions and follow the failure policy.
+- **CRS rule-exclusion syntax.** `applyRuleExclusions()` / `applyRuleExclusionsFromFile()` on `CoreRuleSet` and `CoreRuleSetMatcher` (queued until the rules load, validated eagerly) parse the CRS tuning subset: the configure-time directives `SecRuleRemoveById` (ids and ranges), `SecRuleRemoveByTag` (exact tag), `SecRuleUpdateTargetById` / `SecRuleUpdateTargetByTag` (negated `!TARGET` removals), and runtime exclusion rules (`SecRule ... "...,ctl:..."` with `ruleRemoveById`, `ruleRemoveByTag`, `ruleRemoveTargetById`, `ruleRemoveTargetByTag`) evaluated before the scoring rules on every request. Forms the engine cannot evaluate faithfully fail eagerly (chained rules, unsupported operators or variables, target additions); unknown directives and other `ctl:` options are skipped. Exclusions remain runtime tuning and never enter the compiled-data cache.
 
 ## 0.5.1 - 2026-09-01
 

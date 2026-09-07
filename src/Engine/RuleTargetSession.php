@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Flowd\PhirewallPresetOwaspCrs\Engine;
 
+use Flowd\PhirewallPresetOwaspCrs\Engine\Exclusion\RuntimeExclusions;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\RequestVariableValues;
 
 /**
@@ -11,8 +12,9 @@ use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\RequestVariableValues;
  *
  * Entries filtered by the global exclusions/manipulators are computed once per
  * variable and shared across all rules; rules with id- or tag-specific
- * configuration specialize from that shared result. Filtering happens after
- * the collection cap in {@see RequestVariableValues::entriesFor()}, so an
+ * configuration specialize from that shared result, and exclusions armed by
+ * matched runtime exclusion rules apply last. Filtering happens after the
+ * collection cap in {@see RequestVariableValues::entriesFor()}, so an
  * excluded parameter still counts toward the cap (exclusion cannot "un-cap").
  */
 final class RuleTargetSession
@@ -23,6 +25,7 @@ final class RuleTargetSession
     public function __construct(
         private readonly RuleTargetConfig $ruleTargetConfig,
         private readonly RequestVariableValues $requestVariableValues,
+        private readonly ?RuntimeExclusions $runtimeExclusions = null,
     ) {
     }
 
@@ -44,9 +47,42 @@ final class RuleTargetSession
 
         $ruleSpecificFilter = $this->ruleTargetConfig->ruleSpecificFilter($coreRule);
         if ($ruleSpecificFilter instanceof RuleTargetFilter) {
-            return $ruleSpecificFilter->apply($variable, $entries);
+            $entries = $ruleSpecificFilter->apply($variable, $entries);
+        }
+
+        if ($this->runtimeExclusions instanceof RuntimeExclusions) {
+            return $this->applyRuntimeExclusions($coreRule, $variable, $entries);
         }
 
         return $entries;
+    }
+
+    /**
+     * @param list<array{name: ?string, value: string, isNameEntry?: bool}> $entries
+     * @return list<array{name: ?string, value: string, isNameEntry?: bool}>
+     */
+    private function applyRuntimeExclusions(CoreRule $coreRule, string $variable, array $entries): array
+    {
+        if ($entries === [] || !$this->runtimeExclusions instanceof RuntimeExclusions) {
+            return $entries;
+        }
+
+        $selectors = $this->runtimeExclusions->exclusionSelectorsFor($coreRule, $variable);
+        if ($selectors === []) {
+            return $entries;
+        }
+
+        $result = [];
+        foreach ($entries as $entry) {
+            foreach ($selectors as $selector) {
+                if ($selector->matchesName($entry['name'])) {
+                    continue 2;
+                }
+            }
+
+            $result[] = $entry;
+        }
+
+        return $result;
     }
 }

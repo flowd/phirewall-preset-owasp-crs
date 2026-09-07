@@ -9,7 +9,9 @@ use Flowd\Phirewall\Config\RequestMatcherInterface;
 use Flowd\Phirewall\Matchers\CompiledDataCacheAware;
 use Flowd\Phirewall\Matchers\FailOpenAware;
 use Flowd\Phirewall\Support\CompiledDataCache;
+use Flowd\PhirewallPresetOwaspCrs\Engine\Exclusion\RuleExclusionParser;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\RequestValueManipulatorInterface;
+use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\TargetExclusionConditionInterface;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\TargetSelector;
 use Flowd\PhirewallPresetOwaspCrs\ParanoiaLevel;
 use Flowd\PhirewallPresetOwaspCrs\RuleSetLoader;
@@ -210,13 +212,15 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
     /**
      * Exclude a target from inspection by every rule; see {@see CoreRuleSet::excludeTarget()}.
      *
+     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string): bool|null $when Receives (value, name, variable)
+     *
      * @throws \InvalidArgumentException When the selector form is unsupported.
      */
-    public function excludeTarget(string $selector): self
+    public function excludeTarget(string $selector, TargetExclusionConditionInterface|\Closure|null $when = null): self
     {
         TargetSelector::parseExclusion($selector); // validate eagerly, even when queued
-        $this->configure(static function (CoreRuleSet $coreRuleSet) use ($selector): void {
-            $coreRuleSet->excludeTarget($selector);
+        $this->configure(static function (CoreRuleSet $coreRuleSet) use ($selector, $when): void {
+            $coreRuleSet->excludeTarget($selector, $when);
         });
 
         return $this;
@@ -225,13 +229,15 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
     /**
      * Exclude a target from inspection by one rule; see {@see CoreRuleSet::excludeTargetById()}.
      *
+     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string): bool|null $when Receives (value, name, variable)
+     *
      * @throws \InvalidArgumentException When the selector form is unsupported.
      */
-    public function excludeTargetById(int $ruleId, string $selector): self
+    public function excludeTargetById(int $ruleId, string $selector, TargetExclusionConditionInterface|\Closure|null $when = null): self
     {
         TargetSelector::parseExclusion($selector); // validate eagerly, even when queued
-        $this->configure(static function (CoreRuleSet $coreRuleSet) use ($ruleId, $selector): void {
-            $coreRuleSet->excludeTargetById($ruleId, $selector);
+        $this->configure(static function (CoreRuleSet $coreRuleSet) use ($ruleId, $selector, $when): void {
+            $coreRuleSet->excludeTargetById($ruleId, $selector, $when);
         });
 
         return $this;
@@ -240,16 +246,55 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
     /**
      * Exclude a target from rules carrying a tag; see {@see CoreRuleSet::excludeTargetByTag()}.
      *
+     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string): bool|null $when Receives (value, name, variable)
+     *
      * @throws \InvalidArgumentException When the selector form is unsupported.
      */
-    public function excludeTargetByTag(string $tag, string $selector): self
+    public function excludeTargetByTag(string $tag, string $selector, TargetExclusionConditionInterface|\Closure|null $when = null): self
     {
         TargetSelector::parseExclusion($selector); // validate eagerly, even when queued
-        $this->configure(static function (CoreRuleSet $coreRuleSet) use ($tag, $selector): void {
-            $coreRuleSet->excludeTargetByTag($tag, $selector);
+        $this->configure(static function (CoreRuleSet $coreRuleSet) use ($tag, $selector, $when): void {
+            $coreRuleSet->excludeTargetByTag($tag, $selector, $when);
         });
 
         return $this;
+    }
+
+    /**
+     * Apply CRS rule-exclusion syntax; see {@see CoreRuleSet::applyRuleExclusions()}.
+     *
+     * @param ?string $contextFolder Confines `@pmFromFile` operands of exclusion rule conditions
+     *
+     * @throws \InvalidArgumentException When a line is malformed or uses an unsupported exclusion form.
+     */
+    public function applyRuleExclusions(string $rulesText, ?string $contextFolder = null): self
+    {
+        (new RuleExclusionParser())->parse($rulesText, $contextFolder); // validate eagerly, even when queued
+        $this->configure(static function (CoreRuleSet $coreRuleSet) use ($rulesText, $contextFolder): void {
+            $coreRuleSet->applyRuleExclusions($rulesText, $contextFolder);
+        });
+
+        return $this;
+    }
+
+    /**
+     * Apply CRS rule-exclusion syntax from a file; see {@see CoreRuleSet::applyRuleExclusions()}.
+     * The file is read eagerly, so a missing file fails at configuration time.
+     *
+     * @throws \InvalidArgumentException When the file is missing, malformed or uses an unsupported exclusion form.
+     */
+    public function applyRuleExclusionsFromFile(string $filePath): self
+    {
+        if (!is_file($filePath)) {
+            throw new \InvalidArgumentException('Rule exclusion file not found: ' . $filePath);
+        }
+
+        // Confine @pmFromFile resolution to the exclusion file's own directory,
+        // mirroring SecRuleLoader::fromFile().
+        $resolvedPath = realpath($filePath);
+        $contextFolder = dirname($resolvedPath !== false ? $resolvedPath : $filePath);
+
+        return $this->applyRuleExclusions((string)file_get_contents($filePath), $contextFolder);
     }
 
     /**
