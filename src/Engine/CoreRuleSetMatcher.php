@@ -68,6 +68,9 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
     /** @var list<\Closure(CoreRuleSet): void> Configuration queued until the rule set is loaded. */
     private array $pendingConfiguration = [];
 
+    /** @var array<string, true> Exclusion tags awaiting validation against the loaded rules. */
+    private array $exclusionTagsToValidate = [];
+
     /**
      * @throws \InvalidArgumentException When $anomalyThreshold is not positive.
      */
@@ -245,6 +248,7 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
 
     /**
      * Exclude a target from rules carrying a tag; see {@see CoreRuleSet::excludeTargetByTag()}.
+     * A tag that no loaded rule carries logs a PSR-3 warning once the rules are loaded.
      *
      * @param TargetExclusionConditionInterface|\Closure(string, ?string, string, ServerRequestInterface): bool|null $when Receives (variable, name, value, request)
      *
@@ -256,6 +260,7 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
         $this->configure(static function (CoreRuleSet $coreRuleSet) use ($tag, $selector, $when): void {
             $coreRuleSet->excludeTargetByTag($tag, $selector, $when);
         });
+        $this->recordExclusionTags($tag);
 
         return $this;
     }
@@ -269,10 +274,27 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
      */
     public function applyRuleExclusions(string $rulesText, ?string $contextFolder = null): self
     {
-        (new RuleExclusionParser())->parse($rulesText, $contextFolder); // validate eagerly, even when queued
+        $parsed = (new RuleExclusionParser())->parse($rulesText, $contextFolder); // validate eagerly, even when queued
         $this->configure(static function (CoreRuleSet $coreRuleSet) use ($rulesText, $contextFolder): void {
             $coreRuleSet->applyRuleExclusions($rulesText, $contextFolder);
         });
+
+        $tags = [];
+        foreach ($parsed->directives as $directive) {
+            if ($directive->tag !== null) {
+                $tags[] = $directive->tag;
+            }
+        }
+
+        foreach ($parsed->exclusionRules as $exclusionRule) {
+            foreach ($exclusionRule->exclusions as $ctlExclusion) {
+                if ($ctlExclusion->tag !== null) {
+                    $tags[] = $ctlExclusion->tag;
+                }
+            }
+        }
+
+        $this->recordExclusionTags(...$tags);
 
         return $this;
     }
@@ -366,6 +388,62 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
         $this->pendingConfiguration[] = $configuration;
     }
 
+    /**
+     * Remember tags referenced by exclusions; validated against the rules once
+     * they are loaded (immediately when they already are).
+     */
+    private function recordExclusionTags(string ...$tags): void
+    {
+        foreach ($tags as $tag) {
+            $this->exclusionTagsToValidate[$tag] = true;
+        }
+
+        if ($this->coreRuleSet instanceof CoreRuleSet) {
+            $this->warnAboutUnknownExclusionTags($this->coreRuleSet);
+        }
+    }
+
+    /**
+     * Warn once per registered exclusion tag that no loaded rule carries: such
+     * an exclusion never applies (e.g. a CRS 3 tag against the CRS 4 snapshot).
+     */
+    private function warnAboutUnknownExclusionTags(CoreRuleSet $coreRuleSet): void
+    {
+        if ($this->exclusionTagsToValidate === []) {
+            return;
+        }
+
+        $unknownTags = $this->exclusionTagsToValidate;
+        $this->exclusionTagsToValidate = [];
+
+        if (!$this->logger instanceof LoggerInterface) {
+            return;
+        }
+
+        // Cross tags off as rules carry them; once none are left the scan stops
+        // early, so a valid configuration never walks the whole rule set.
+        foreach ($coreRuleSet->ids() as $id) {
+            $rule = $coreRuleSet->getRule($id);
+            if (!$rule instanceof CoreRule) {
+                continue;
+            }
+
+            foreach ($rule->tags as $loadedTag) {
+                unset($unknownTags[$loadedTag]);
+            }
+
+            if ($unknownTags === []) {
+                return;
+            }
+        }
+
+        foreach (array_keys($unknownTags) as $tag) {
+            $this->logger->warning('OWASP CRS exclusion tag {tag} matches no loaded rule; the exclusion never applies', [
+                'tag' => $tag,
+            ]);
+        }
+    }
+
     private function headerRuleIds(RuleSetEvaluation $ruleSetEvaluation): string
     {
         $ruleIds = $ruleSetEvaluation->matchedRuleIds();
@@ -442,8 +520,10 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
         }
 
         $this->pendingConfiguration = [];
+        $this->coreRuleSet = $coreRuleSet;
+        $this->warnAboutUnknownExclusionTags($coreRuleSet);
 
-        return $this->coreRuleSet = $coreRuleSet;
+        return $coreRuleSet;
     }
 
     private function loadRuleSet(): CoreRuleSet
