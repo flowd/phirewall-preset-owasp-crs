@@ -190,4 +190,44 @@ final class CoreRuleSetCrsExclusionTest extends TestCase
 
         $matcher->applyRuleExclusionsFromFile(vfsStream::setup('empty')->url() . '/missing.conf');
     }
+
+    public function testRuleSetAppliesRuleExclusionsFromFile(): void
+    {
+        $root = vfsStream::setup('exclusions');
+        $file = vfsStream::newFile('crs-exclusions.conf')
+            ->withContent('SecRuleRemoveById 400022' . "\n")
+            ->at($root);
+
+        $coreRuleSet = new CoreRuleSet([$this->argsRule(400022)]);
+        $coreRuleSet->applyRuleExclusionsFromFile($file->url());
+
+        $request = (new ServerRequest('GET', '/'))->withQueryParams(['q' => 'suspicious']);
+        $this->assertFalse($coreRuleSet->evaluate($request)->isBlocked());
+    }
+
+    public function testUnreadableRuleExclusionFileIsRejectedByTheRuleSet(): void
+    {
+        $root = vfsStream::setup('exclusions');
+        $file = vfsStream::newFile('crs-exclusions.conf', 0o000)
+            ->withContent('SecRuleRemoveById 400023')
+            ->at($root);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Cannot read rule exclusion file');
+
+        (new CoreRuleSet())->applyRuleExclusionsFromFile($file->url());
+    }
+
+    public function testUnreadableRuleExclusionFileIsRejectedByTheMatcher(): void
+    {
+        $root = vfsStream::setup('exclusions');
+        $file = vfsStream::newFile('crs-exclusions.conf', 0o000)
+            ->withContent('SecRuleRemoveById 400024')
+            ->at($root);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Cannot read rule exclusion file');
+
+        (new CoreRuleSetMatcher(new CoreRuleSet()))->applyRuleExclusionsFromFile($file->url());
+    }
 }

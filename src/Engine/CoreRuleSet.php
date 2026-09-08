@@ -189,6 +189,7 @@ final class CoreRuleSet
      * Apply CRS rule-exclusion syntax from a file; see {@see applyRuleExclusions()}.
      *
      * @throws \InvalidArgumentException When the file is missing, malformed or uses an unsupported exclusion form.
+     * @throws \RuntimeException When the file cannot be read.
      */
     public function applyRuleExclusionsFromFile(string $filePath): self
     {
@@ -201,7 +202,12 @@ final class CoreRuleSet
         $resolvedPath = realpath($filePath);
         $contextFolder = dirname($resolvedPath !== false ? $resolvedPath : $filePath);
 
-        return $this->applyRuleExclusions((string)file_get_contents($filePath), $contextFolder);
+        $rulesText = @file_get_contents($filePath);
+        if ($rulesText === false) {
+            throw new \RuntimeException('Cannot read rule exclusion file: ' . $filePath);
+        }
+
+        return $this->applyRuleExclusions($rulesText, $contextFolder);
     }
 
     /**
