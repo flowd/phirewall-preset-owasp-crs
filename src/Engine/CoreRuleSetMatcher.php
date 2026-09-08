@@ -215,7 +215,7 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
     /**
      * Exclude a target from inspection by every rule; see {@see CoreRuleSet::excludeTarget()}.
      *
-     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string): bool|null $when Receives (value, name, variable)
+     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string, ServerRequestInterface): bool|null $when Receives (variable, name, value, request)
      *
      * @throws \InvalidArgumentException When the selector form is unsupported.
      */
@@ -232,7 +232,7 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
     /**
      * Exclude a target from inspection by one rule; see {@see CoreRuleSet::excludeTargetById()}.
      *
-     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string): bool|null $when Receives (value, name, variable)
+     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string, ServerRequestInterface): bool|null $when Receives (variable, name, value, request)
      *
      * @throws \InvalidArgumentException When the selector form is unsupported.
      */
@@ -250,7 +250,7 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
      * Exclude a target from rules carrying a tag; see {@see CoreRuleSet::excludeTargetByTag()}.
      * A tag that no loaded rule carries logs a PSR-3 warning once the rules are loaded.
      *
-     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string): bool|null $when Receives (value, name, variable)
+     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string, ServerRequestInterface): bool|null $when Receives (variable, name, value, request)
      *
      * @throws \InvalidArgumentException When the selector form is unsupported.
      */
@@ -328,7 +328,7 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
     /**
      * Register a global manipulator; see {@see CoreRuleSet::addManipulator()}.
      *
-     * @param RequestValueManipulatorInterface|\Closure(string, ?string, string): string $manipulator
+     * @param RequestValueManipulatorInterface|\Closure(string, ?string, string, ServerRequestInterface): string $manipulator
      */
     public function addManipulator(RequestValueManipulatorInterface|\Closure $manipulator): self
     {
@@ -342,7 +342,7 @@ final class CoreRuleSetMatcher implements RequestMatcherInterface, CompiledDataC
     /**
      * Register a per-rule manipulator; see {@see CoreRuleSet::addManipulatorById()}.
      *
-     * @param RequestValueManipulatorInterface|\Closure(string, ?string, string): string $manipulator
+     * @param RequestValueManipulatorInterface|\Closure(string, ?string, string, ServerRequestInterface): string $manipulator
      */
     public function addManipulatorById(int $ruleId, RequestValueManipulatorInterface|\Closure $manipulator): self
     {

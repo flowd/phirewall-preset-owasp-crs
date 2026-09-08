@@ -9,6 +9,7 @@ use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSet;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\RequestValueManipulatorInterface;
 use Nyholm\Psr7\ServerRequest;
 use PHPUnit\Framework\TestCase;
+use Psr\Http\Message\ServerRequestInterface;
 
 final class CoreRuleSetManipulatorTest extends TestCase
 {
@@ -121,5 +122,27 @@ final class CoreRuleSetManipulatorTest extends TestCase
 
         $this->assertNotContains('utm_source', $seenNames, 'Excluded entries never reach a manipulator');
         $this->assertContains('q', $seenNames);
+    }
+
+    public function testClosureManipulatorReceivesTheRequest(): void
+    {
+        $received = [];
+        $coreRuleSet = new CoreRuleSet([$this->argsRule(300010)]);
+        $coreRuleSet->addManipulator(
+            static function (string $variable, ?string $name, string $value, ServerRequestInterface $serverRequest) use (&$received): string {
+                $received[] = $serverRequest;
+
+                // Neutralize the payload on the health-check path only.
+                return $serverRequest->getUri()->getPath() === '/health' ? '' : $value;
+            },
+        );
+
+        $healthCheck = (new ServerRequest('GET', '/health'))->withQueryParams(['q' => 'suspicious']);
+        $this->assertFalse($coreRuleSet->evaluate($healthCheck)->isBlocked(), 'The manipulator can act on request context');
+        $this->assertNotSame([], $received);
+        $this->assertSame($healthCheck, $received[0], 'The closure receives the request as its fourth argument');
+
+        $regularRequest = (new ServerRequest('GET', '/search'))->withQueryParams(['q' => 'suspicious']);
+        $this->assertTrue($coreRuleSet->evaluate($regularRequest)->isBlocked(), 'Other requests stay inspected');
     }
 }

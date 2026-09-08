@@ -10,6 +10,7 @@ use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSetMatcher;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\TargetExclusionConditionInterface;
 use Nyholm\Psr7\ServerRequest;
 use PHPUnit\Framework\TestCase;
+use Psr\Http\Message\ServerRequestInterface;
 
 final class CoreRuleSetConditionalExclusionTest extends TestCase
 {
@@ -37,7 +38,7 @@ final class CoreRuleSetConditionalExclusionTest extends TestCase
         $coreRuleSet = new CoreRuleSet([$this->argsRule(300001)]);
         $coreRuleSet->excludeTarget(
             'ARGS:token',
-            when: static fn(string $value): bool => str_starts_with($value, 'valid-'),
+            when: static fn(string $variable, ?string $name, string $value): bool => str_starts_with($value, 'valid-'),
         );
 
         $approved = (new ServerRequest('GET', '/'))->withQueryParams(['token' => 'valid-suspicious']);
@@ -57,14 +58,14 @@ final class CoreRuleSetConditionalExclusionTest extends TestCase
         $this->assertTrue($coreRuleSet->evaluate($request)->isBlocked(), 'Other parameters remain inspected');
     }
 
-    public function testConditionReceivesValueNameAndVariable(): void
+    public function testConditionReceivesVariableNameValueAndRequest(): void
     {
         $received = [];
         $coreRuleSet = new CoreRuleSet([$this->argsRule(300003)]);
         $coreRuleSet->excludeTarget(
             'ARGS:token',
-            when: static function (string $value, ?string $name, string $variable) use (&$received): bool {
-                $received[] = [$value, $name, $variable];
+            when: static function (string $variable, ?string $name, string $value, ServerRequestInterface $serverRequest) use (&$received): bool {
+                $received[] = [$variable, $name, $value, $serverRequest];
 
                 return true;
             },
@@ -73,13 +74,30 @@ final class CoreRuleSetConditionalExclusionTest extends TestCase
         $request = (new ServerRequest('GET', '/'))->withQueryParams(['token' => 'suspicious', 'q' => 'harmless']);
         $coreRuleSet->evaluate($request);
 
-        // The second invocation is the injected ARGS name entry (the parameter
-        // name as its value); it stays under inspection unless the condition
-        // approves it too. The untouched "q" parameter is never passed.
+        // Same argument order as a manipulator, plus the request. The second
+        // invocation is the injected ARGS name entry (the parameter name as its
+        // value); it stays under inspection unless the condition approves it
+        // too. The untouched "q" parameter is never passed.
         $this->assertSame([
-            ['suspicious', 'token', 'ARGS'],
-            ['token', 'token', 'ARGS'],
+            ['ARGS', 'token', 'suspicious', $request],
+            ['ARGS', 'token', 'token', $request],
         ], $received, 'The condition only sees entries the selector matches');
+    }
+
+    public function testConditionCanUseTheRequestForContext(): void
+    {
+        $coreRuleSet = new CoreRuleSet([$this->argsRule(300012)]);
+        $coreRuleSet->excludeTarget(
+            'ARGS:token',
+            when: static fn(string $variable, ?string $name, string $value, ServerRequestInterface $serverRequest): bool
+                => $serverRequest->getUri()->getPath() === '/api/orders',
+        );
+
+        $approvedPath = (new ServerRequest('GET', '/api/orders'))->withQueryParams(['token' => 'suspicious']);
+        $this->assertFalse($coreRuleSet->evaluate($approvedPath)->isBlocked(), 'The condition can approve based on request context');
+
+        $otherPath = (new ServerRequest('GET', '/search'))->withQueryParams(['token' => 'suspicious']);
+        $this->assertTrue($coreRuleSet->evaluate($otherPath)->isBlocked(), 'Other requests stay under inspection');
     }
 
     public function testConditionalExclusionByTagLeavesOtherRulesInspecting(): void
@@ -91,7 +109,7 @@ final class CoreRuleSetConditionalExclusionTest extends TestCase
         $coreRuleSet->excludeTargetByTag(
             'attack-sqli',
             'ARGS:token',
-            when: static fn(string $value): bool => str_starts_with($value, 'valid-'),
+            when: static fn(string $variable, ?string $name, string $value): bool => str_starts_with($value, 'valid-'),
         );
 
         $request = (new ServerRequest('GET', '/'))->withQueryParams(['token' => 'valid-suspicious']);
@@ -106,7 +124,7 @@ final class CoreRuleSetConditionalExclusionTest extends TestCase
         $coreRuleSet->excludeTargetById(
             300006,
             'ARGS:token',
-            when: static fn(string $value): bool => str_starts_with($value, 'valid-'),
+            when: static fn(string $variable, ?string $name, string $value): bool => str_starts_with($value, 'valid-'),
         );
 
         $request = (new ServerRequest('GET', '/'))->withQueryParams(['token' => 'valid-suspicious']);
@@ -118,7 +136,7 @@ final class CoreRuleSetConditionalExclusionTest extends TestCase
     public function testConditionInterfaceImplementationIsAccepted(): void
     {
         $condition = new class () implements TargetExclusionConditionInterface {
-            public function shouldExclude(string $value, ?string $name, string $variable): bool
+            public function shouldExclude(string $variable, ?string $name, string $value, ServerRequestInterface $serverRequest): bool
             {
                 return str_starts_with($value, 'valid-');
             }
@@ -162,7 +180,7 @@ final class CoreRuleSetConditionalExclusionTest extends TestCase
         $matcher = new CoreRuleSetMatcher(new CoreRuleSet([$this->argsRule(300010)]), anomalyThreshold: 5);
         $matcher->excludeTarget(
             'ARGS:token',
-            when: static fn(string $value): bool => str_starts_with($value, 'valid-'),
+            when: static fn(string $variable, ?string $name, string $value): bool => str_starts_with($value, 'valid-'),
         );
 
         $approved = (new ServerRequest('GET', '/'))->withQueryParams(['token' => 'valid-suspicious']);
@@ -179,7 +197,7 @@ final class CoreRuleSetConditionalExclusionTest extends TestCase
 
         $this->assertTrue($coreRuleSet->evaluate($request)->isBlocked());
 
-        $coreRuleSet->excludeTarget('ARGS:token', when: static fn(string $value): bool => str_starts_with($value, 'valid-'));
+        $coreRuleSet->excludeTarget('ARGS:token', when: static fn(string $variable, ?string $name, string $value): bool => str_starts_with($value, 'valid-'));
 
         $this->assertFalse($coreRuleSet->evaluate($request)->isBlocked(), 'The per-rule filter cache must invalidate');
     }

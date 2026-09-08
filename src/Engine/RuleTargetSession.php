@@ -40,6 +40,7 @@ final class RuleTargetSession
             $this->globalCache[$variable] = $this->ruleTargetConfig->globalFilter()->apply(
                 $variable,
                 $this->requestVariableValues->entriesFor($variable),
+                $this->requestVariableValues->serverRequest(),
             );
         }
 
@@ -47,7 +48,7 @@ final class RuleTargetSession
 
         $ruleSpecificFilter = $this->ruleTargetConfig->ruleSpecificFilter($coreRule);
         if ($ruleSpecificFilter instanceof RuleTargetFilter) {
-            $entries = $ruleSpecificFilter->apply($variable, $entries);
+            $entries = $ruleSpecificFilter->apply($variable, $entries, $this->requestVariableValues->serverRequest());
         }
 
         if ($this->runtimeExclusions instanceof RuntimeExclusions) {

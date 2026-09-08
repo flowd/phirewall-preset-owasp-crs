@@ -80,8 +80,14 @@ echo "Untuned rule set:\n";
 $assert('valid JWT in token (false positive)', $untuned->match($tokenRequest($validToken))->isMatch(), true);
 
 // --- 1. Conditional exclusion: verify the signature ------------------------
+// The condition receives (variable, name, value, request) - the same argument
+// order as a manipulator.
 $validated = $freshMatcher();
-$validated->excludeTargetById(900110, 'ARGS:token', when: $isValidToken);
+$validated->excludeTargetById(
+    900110,
+    'ARGS:token',
+    when: static fn(string $variable, ?string $name, string $value): bool => $isValidToken($value),
+);
 
 echo "\nConditional exclusion (when: verified JWT signature):\n";
 $assert('valid JWT in token', $validated->match($tokenRequest($validToken))->isMatch(), false);
