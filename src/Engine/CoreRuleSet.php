@@ -115,7 +115,7 @@ final class CoreRuleSet
      * an entry is only excluded while the condition approves its value (e.g.
      * a signature-verified JWT); see {@see TargetExclusionConditionInterface}.
      *
-     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string): bool|null $when Receives (value, name, variable)
+     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string, ServerRequestInterface): bool|null $when Receives (variable, name, value, request)
      *
      * @throws \InvalidArgumentException When the selector form is unsupported.
      */
@@ -131,7 +131,7 @@ final class CoreRuleSet
      * `SecRuleUpdateTargetById` tuning), optionally only when $when approves
      * the value; see {@see excludeTarget()}.
      *
-     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string): bool|null $when Receives (value, name, variable)
+     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string, ServerRequestInterface): bool|null $when Receives (variable, name, value, request)
      *
      * @throws \InvalidArgumentException When the selector form is unsupported.
      */
@@ -147,7 +147,7 @@ final class CoreRuleSet
      * (e.g. `'attack-sqli'`), optionally only when $when approves the value;
      * see {@see excludeTarget()}.
      *
-     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string): bool|null $when Receives (value, name, variable)
+     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string, ServerRequestInterface): bool|null $when Receives (variable, name, value, request)
      *
      * @throws \InvalidArgumentException When the selector form is unsupported.
      */
@@ -214,7 +214,7 @@ final class CoreRuleSet
      * Register a manipulator transforming collected values before every rule
      * matches. Manipulators weaken detection; prefer target exclusions.
      *
-     * @param RequestValueManipulatorInterface|\Closure(string, ?string, string): string $manipulator
+     * @param RequestValueManipulatorInterface|\Closure(string, ?string, string, ServerRequestInterface): string $manipulator
      */
     public function addManipulator(RequestValueManipulatorInterface|\Closure $manipulator): self
     {
@@ -226,7 +226,7 @@ final class CoreRuleSet
     /**
      * Register a manipulator transforming collected values before one rule matches.
      *
-     * @param RequestValueManipulatorInterface|\Closure(string, ?string, string): string $manipulator
+     * @param RequestValueManipulatorInterface|\Closure(string, ?string, string, ServerRequestInterface): string $manipulator
      */
     public function addManipulatorById(int $ruleId, RequestValueManipulatorInterface|\Closure $manipulator): self
     {
@@ -410,7 +410,7 @@ final class CoreRuleSet
     }
 
     /**
-     * @param RequestValueManipulatorInterface|\Closure(string, ?string, string): string $manipulator
+     * @param RequestValueManipulatorInterface|\Closure(string, ?string, string, ServerRequestInterface): string $manipulator
      */
     private function asManipulator(RequestValueManipulatorInterface|\Closure $manipulator): RequestValueManipulatorInterface
     {
@@ -420,7 +420,7 @@ final class CoreRuleSet
     }
 
     /**
-     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string): bool|null $when
+     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string, ServerRequestInterface): bool|null $when
      *
      * @throws \InvalidArgumentException When the selector form is unsupported.
      */
@@ -430,7 +430,7 @@ final class CoreRuleSet
     }
 
     /**
-     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string): bool|null $when
+     * @param TargetExclusionConditionInterface|\Closure(string, ?string, string, ServerRequestInterface): bool|null $when
      */
     private function asCondition(TargetExclusionConditionInterface|\Closure|null $when): ?TargetExclusionConditionInterface
     {

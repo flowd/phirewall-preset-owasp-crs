@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Flowd\PhirewallPresetOwaspCrs\Engine\Variable;
 
+use Psr\Http\Message\ServerRequestInterface;
+
 /**
  * A registered target exclusion: the selector picks entries by name, the
  * optional condition then approves each selected entry's value. Without a
@@ -20,7 +22,7 @@ final readonly class TargetExclusion
     /**
      * Whether the entry is excluded from inspection.
      */
-    public function excludes(?string $name, string $value): bool
+    public function excludes(?string $name, string $value, ServerRequestInterface $serverRequest): bool
     {
         if (!$this->selector->matchesName($name)) {
             return false;
@@ -30,6 +32,6 @@ final readonly class TargetExclusion
             return true;
         }
 
-        return $this->condition->shouldExclude($value, $name, $this->selector->variable);
+        return $this->condition->shouldExclude($this->selector->variable, $name, $value, $serverRequest);
     }
 }

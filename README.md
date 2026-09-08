@@ -179,17 +179,22 @@ legitimate value and stays fully inspected otherwise:
 $coreRuleSet->excludeTargetByTag(
     'attack-sqli',
     'ARGS:token',
-    when: static fn (string $value): bool => $jwtValidator->isValid($value),
+    when: static fn (string $variable, ?string $name, string $value): bool
+        => $jwtValidator->isValid($value),
 );
 ```
 
-The condition receives `(string $value, ?string $name, string $variable)` and
-returns `true` to exclude; implement `TargetExclusionConditionInterface` for a
-reusable validator. Validate strictly - verify the signature, parse the full
-format: everything the condition approves is invisible to the rules in scope,
-and a shape-only check ("looks like a JWT") invites attackers to wrap payloads
-in that shape. Exceptions thrown by a condition propagate like manipulator
-exceptions and follow the failure policy (`useFailOpen()`).
+The condition receives `(string $variable, ?string $name, string $value,
+ServerRequestInterface $request)` - the same argument order as a manipulator -
+and returns `true` to exclude; a closure declaring fewer parameters ignores the
+rest. The request enables context-dependent validation (per-host issuers,
+path-scoped rules, comparing against another header). Implement
+`TargetExclusionConditionInterface` for a reusable validator. Validate
+strictly - verify the signature, parse the full format: everything the
+condition approves is invisible to the rules in scope, and a shape-only check
+("looks like a JWT") invites attackers to wrap payloads in that shape.
+Exceptions thrown by a condition propagate like manipulator exceptions and
+follow the failure policy (`useFailOpen()`).
 
 ### CRS rule-exclusion syntax
 
@@ -247,6 +252,12 @@ $coreRuleSet->addManipulator(
 );
 $coreRuleSet->addManipulatorById(942431, $manipulator); // scoped to one rule
 ```
+
+Closure manipulators receive the request as an optional fourth argument
+`(string $variable, ?string $name, string $value, ServerRequestInterface $request)` -
+the same order as a `when:` exclusion condition; declare it when the
+transformation depends on request context. The three-parameter
+`RequestValueManipulatorInterface` is unchanged.
 
 > **Warning:** whatever a manipulator removes or rewrites is invisible to every
 > rule it applies to - including real attack payloads hidden inside the removed

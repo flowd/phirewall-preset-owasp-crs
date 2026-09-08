@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Flowd\PhirewallPresetOwaspCrs\Engine;
 
+use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\CallableRequestValueManipulator;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\RequestValueManipulatorInterface;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Variable\TargetExclusion;
+use Psr\Http\Message\ServerRequestInterface;
 
 /**
  * Immutable set of target exclusions and manipulators applied to collected
@@ -36,7 +38,7 @@ final readonly class RuleTargetFilter
      * @param list<array{name: ?string, value: string, isNameEntry?: bool}> $entries
      * @return list<array{name: ?string, value: string, isNameEntry?: bool}>
      */
-    public function apply(string $variable, array $entries): array
+    public function apply(string $variable, array $entries, ServerRequestInterface $serverRequest): array
     {
         $exclusions = $this->exclusionsByVariable[$variable] ?? [];
         if ($exclusions === [] && $this->manipulators === []) {
@@ -46,13 +48,17 @@ final readonly class RuleTargetFilter
         $result = [];
         foreach ($entries as $entry) {
             foreach ($exclusions as $exclusion) {
-                if ($exclusion->excludes($entry['name'], $entry['value'])) {
+                if ($exclusion->excludes($entry['name'], $entry['value'], $serverRequest)) {
                     continue 2;
                 }
             }
 
             foreach ($this->manipulators as $manipulator) {
-                $entry['value'] = $manipulator->manipulate($variable, $entry['name'], $entry['value']);
+                // The adapter forwards the request to closure manipulators; the
+                // 3-parameter interface stays untouched for compatibility.
+                $entry['value'] = $manipulator instanceof CallableRequestValueManipulator
+                    ? $manipulator->manipulate($variable, $entry['name'], $entry['value'], $serverRequest)
+                    : $manipulator->manipulate($variable, $entry['name'], $entry['value']);
             }
 
             $result[] = $entry;

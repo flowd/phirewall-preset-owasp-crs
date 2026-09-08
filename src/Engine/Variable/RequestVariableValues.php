@@ -67,6 +67,14 @@ final class RequestVariableValues
     }
 
     /**
+     * The request the values are collected from.
+     */
+    public function serverRequest(): ServerRequestInterface
+    {
+        return $this->serverRequest;
+    }
+
+    /**
      * Default per-variable value cap: twice PHP's `max_input_vars` directive. The cap counts
      * collected values, and variables such as ARGS emit both a name and a value per parameter
      * (~2 values per input var), so doubling max_input_vars sizes the budget to the parameter
