@@ -8,7 +8,9 @@ use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRule;
 use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSet;
 use Flowd\PhirewallPresetOwaspCrs\Engine\CoreRuleSetMatcher;
 use Flowd\PhirewallPresetOwaspCrs\Engine\LogDataExpander;
+use Flowd\PhirewallPresetOwaspCrs\ParanoiaLevel;
 use Nyholm\Psr7\ServerRequest;
+use org\bovigo\vfs\vfsStream;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
 
@@ -164,5 +166,85 @@ final class CoreRuleSetMatcherLoggingTest extends TestCase
         $this->assertStringNotContainsString($secretCookieValue, $context['log_data']);
         $this->assertStringNotContainsString('union select', $context['log_data']);
         $this->assertStringContainsString(LogDataExpander::REDACTED_PLACEHOLDER, $context['log_data']);
+    }
+
+    private function taggedRule(int $id, string $tag): CoreRule
+    {
+        return new CoreRule($id, ['ARGS'], '@contains', 'suspicious', ['deny' => true], null, 5, 'CRITICAL', 1, [$tag]);
+    }
+
+    /**
+     * @param AbstractLogger&object{records: list<array{level: string, message: string, context: array<string, mixed>}>} $logger
+     * @return list<array{level: string, message: string, context: array<string, mixed>}>
+     */
+    private function warningRecords(AbstractLogger $logger): array
+    {
+        return array_values(array_filter(
+            $logger->records,
+            static fn(array $record): bool => $record['level'] === 'warning',
+        ));
+    }
+
+    public function testWarnsWhenAnExclusionTagMatchesNoLoadedRule(): void
+    {
+        $logger = $this->loggerSpy();
+        $matcher = new CoreRuleSetMatcher(new CoreRuleSet([$this->taggedRule(400101, 'attack-sqli')]), logger: $logger);
+
+        $matcher->excludeTargetByTag('OWASP_CRS/WEB_ATTACK/SQL_INJECTION', 'REQUEST_COOKIES:_pin_aem');
+
+        $warnings = $this->warningRecords($logger);
+        $this->assertCount(1, $warnings);
+        $this->assertStringContainsString('matches no loaded rule', $warnings[0]['message']);
+        $this->assertSame('OWASP_CRS/WEB_ATTACK/SQL_INJECTION', $warnings[0]['context']['tag']);
+    }
+
+    public function testDoesNotWarnForAKnownExclusionTag(): void
+    {
+        $logger = $this->loggerSpy();
+        $matcher = new CoreRuleSetMatcher(new CoreRuleSet([$this->taggedRule(400102, 'attack-sqli')]), logger: $logger);
+
+        $matcher->excludeTargetByTag('attack-sqli', 'REQUEST_COOKIES:_pin_aem');
+
+        $this->assertSame([], $this->warningRecords($logger));
+    }
+
+    public function testWarnsForUnknownTagsInCrsExclusionText(): void
+    {
+        $logger = $this->loggerSpy();
+        $matcher = new CoreRuleSetMatcher(new CoreRuleSet([$this->taggedRule(400103, 'attack-sqli')]), logger: $logger);
+
+        $matcher->applyRuleExclusions(<<<'CONF'
+            SecRuleUpdateTargetByTag old-directive-tag "!ARGS:token"
+            SecRule REQUEST_URI "@beginsWith /api/" \
+                "id:410010,phase:1,pass,nolog,ctl:ruleRemoveTargetByTag=old-ctl-tag;ARGS:token"
+            CONF);
+
+        $warnedTags = array_map(
+            static fn(array $record): mixed => $record['context']['tag'],
+            $this->warningRecords($logger),
+        );
+        sort($warnedTags);
+        $this->assertSame(['old-ctl-tag', 'old-directive-tag'], $warnedTags);
+    }
+
+    public function testQueuedExclusionTagIsValidatedOnceTheRulesLoad(): void
+    {
+        $root = vfsStream::setup('crs');
+        $rulesDirectory = vfsStream::newDirectory('rules')->at($root);
+        vfsStream::newFile('REQUEST-400-TEST.pl1.conf')->at($rulesDirectory)->setContent(
+            'SecRule ARGS "@contains suspicious" "id:400104,phase:2,deny,severity:CRITICAL,tag:\'attack-sqli\'"' . "\n",
+        );
+
+        $logger = $this->loggerSpy();
+        $matcher = CoreRuleSetMatcher::fromRuleFiles(ParanoiaLevel::Level1, $rulesDirectory->url(), logger: $logger);
+        $matcher->excludeTargetByTag('OWASP_CRS/WEB_ATTACK/SQL_INJECTION', 'REQUEST_COOKIES:_pin_aem');
+
+        $this->assertSame([], $logger->records, 'Validation waits for the rules to load');
+
+        $matcher->match(new ServerRequest('GET', '/'));
+
+        $warnings = $this->warningRecords($logger);
+        $this->assertCount(1, $warnings);
+        $this->assertSame('OWASP_CRS/WEB_ATTACK/SQL_INJECTION', $warnings[0]['context']['tag']);
     }
 }
