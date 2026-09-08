@@ -168,6 +168,70 @@ exclusion naming the variable that rule actually inspects -
 'QUERY_STRING')`. A selector naming a variable the rule does not target is accepted
 but silently does nothing.
 
+#### Conditional exclusions: validate the value first
+
+Every exclude method accepts a `when:` condition - the selected entry is only
+excluded while the condition approves its value. That turns a blanket exclusion
+into a validated one: a parameter is skipped when it provably carries a
+legitimate value and stays fully inspected otherwise:
+
+```php
+$coreRuleSet->excludeTargetByTag(
+    'attack-sqli',
+    'ARGS:token',
+    when: static fn (string $value): bool => $jwtValidator->isValid($value),
+);
+```
+
+The condition receives `(string $value, ?string $name, string $variable)` and
+returns `true` to exclude; implement `TargetExclusionConditionInterface` for a
+reusable validator. Validate strictly - verify the signature, parse the full
+format: everything the condition approves is invisible to the rules in scope,
+and a shape-only check ("looks like a JWT") invites attackers to wrap payloads
+in that shape. Exceptions thrown by a condition propagate like manipulator
+exceptions and follow the failure policy (`useFailOpen()`).
+
+### CRS rule-exclusion syntax
+
+`applyRuleExclusions()` and `applyRuleExclusionsFromFile()` - on `CoreRuleSet`
+and `CoreRuleSetMatcher` (queued until the rules load, validated eagerly) and
+thus reachable through the presets' `configure:` closure - accept the CRS
+rule-exclusion syntax, so existing ModSecurity tuning files can be reused:
+
+```php
+$matcher->applyRuleExclusions(<<<'CONF'
+    # Configure-time directives: apply once, to the rules already loaded
+    SecRuleRemoveById 942440 "942430-942432"
+    SecRuleRemoveByTag "attack-generic"
+    SecRuleUpdateTargetById 942100 "!ARGS:search"
+    SecRuleUpdateTargetByTag attack-sqli "!ARGS:/^utm_/"
+
+    # Runtime exclusion rule: evaluated before the scoring rules on every
+    # request; its ctl: exclusions apply only to requests it matches.
+    SecRule REQUEST_URI "@beginsWith /api/webhooks/" \
+        "id:10001,phase:1,pass,nolog,\
+        ctl:ruleRemoveTargetByTag=attack-sqli;ARGS:payload"
+    CONF);
+```
+
+Supported forms: `SecRuleRemoveById` (ids and `from-to` ranges),
+`SecRuleRemoveByTag` (exact tag, not a regex), `SecRuleUpdateTargetById` /
+`SecRuleUpdateTargetByTag` (negated `!TARGET` removals only), and runtime
+`SecRule` exclusions with `ctl:ruleRemoveById`, `ctl:ruleRemoveByTag`,
+`ctl:ruleRemoveTargetById` or `ctl:ruleRemoveTargetByTag`. Anything the engine
+cannot evaluate faithfully fails eagerly with an `InvalidArgumentException`
+instead of arming a weaker or dead exclusion: chained rules, unsupported
+condition operators or variables, target additions and malformed directives
+all throw. Unknown directives (`SecMarker`, ...) and other `ctl:` options
+(`ctl:ruleEngine`, ...) are skipped. Like every exclusion this is runtime
+tuning and never enters the compiled-data cache.
+
+A runtime exclusion's condition can only pattern-match (`@rx` and friends), so
+it can check that a value *looks like* a JWT but not that it *is* one - an
+attacker can wrap a payload in the approved shape. When the value can be
+validated in PHP, prefer a conditional exclusion (`when:`) that verifies the
+signature; see above.
+
 ### Manipulators (advanced, weakens detection)
 
 A manipulator transforms collected values before rules match against them - the

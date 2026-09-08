@@ -23,6 +23,19 @@ final class SecRuleParser
      */
     public function parseLine(string $line, ?string $contextFolder = null): ?CoreRule
     {
+        return $this->parseLineWithCtl($line, $contextFolder)['rule'] ?? null;
+    }
+
+    /**
+     * Parse a raw "SecRule" line into the rule plus its raw `ctl:` action
+     * values (CRS exclusion syntax, consumed by
+     * {@see Exclusion\RuleExclusionParser}). The main rule loading ignores
+     * ctl actions; they only take effect through the exclusion API.
+     *
+     * @return array{rule: CoreRule, ctl: list<string>}|null
+     */
+    public function parseLineWithCtl(string $line, ?string $contextFolder = null): ?array
+    {
         // Defensive: collapse backslash-newline continuations into a single logical line
         // Join "\\\n<indent>" and "\\\r\n<indent>" sequences
         $line = preg_replace("/\\\\\r?\n[ \t]*/", '', $line) ?? $line;
@@ -61,7 +74,7 @@ final class SecRuleParser
         }
 
         // Actions: comma-separated key[:value]
-        ['actions' => $actions, 'tags' => $tags] = $this->parseActions($actionsPart);
+        ['actions' => $actions, 'tags' => $tags, 'ctls' => $ctls] = $this->parseActions($actionsPart);
         $id = isset($actions['id']) ? (int)$actions['id'] : 0;
         if ($id <= 0) {
             return null; // require id
@@ -90,7 +103,10 @@ final class SecRuleParser
             }
         }
 
-        return new CoreRule($id, $variables, $op, $arg, $actions, $contextFolder, $anomalyScore, $severity, $paranoiaLevel, $tags);
+        return [
+            'rule' => new CoreRule($id, $variables, $op, $arg, $actions, $contextFolder, $anomalyScore, $severity, $paranoiaLevel, $tags),
+            'ctl' => $ctls,
+        ];
     }
 
     /**
@@ -229,10 +245,10 @@ final class SecRuleParser
 
     /**
      * Parse actions key/value map. Values can be quoted (single or double). Commas separate actions.
-     * Boolean actions like "deny" will be set to true. Repeated `tag:` actions are
-     * collected into the tags list (in source order) instead of the last-wins map.
+     * Boolean actions like "deny" will be set to true. Repeated `tag:` and `ctl:` actions are
+     * collected into their own lists (in source order) instead of the last-wins map.
      *
-     * @return array{actions: array<string, int|string|bool>, tags: list<string>}
+     * @return array{actions: array<string, int|string|bool>, tags: list<string>, ctls: list<string>}
      */
     private function parseActions(string $actionsPart): array
     {
@@ -264,6 +280,7 @@ final class SecRuleParser
         }
 
         $tags = [];
+        $ctls = [];
         foreach ($parts as $part) {
             if ($part === '') {
                 continue;
@@ -280,11 +297,16 @@ final class SecRuleParser
                     continue;
                 }
 
+                if ($key === 'ctl') {
+                    $ctls[] = $value;
+                    continue;
+                }
+
                 $actions[$key] = is_numeric($value) ? (int)$value : $value;
             }
         }
 
-        return ['actions' => $actions, 'tags' => $tags];
+        return ['actions' => $actions, 'tags' => $tags, 'ctls' => $ctls];
     }
 
     private function stripQuotes(string $value): string
