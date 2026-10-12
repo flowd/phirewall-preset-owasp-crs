@@ -1,21 +1,21 @@
 {
-    "crsVersion": "v4.29.0",
-    "importedAt": "2026-08-26T21:13:19+00:00",
+    "crsVersion": "v4.30.0",
+    "importedAt": "2026-10-12T12:15:59+00:00",
     "ruleCountsByParanoiaLevel": {
-        "1": 114,
+        "1": 115,
         "2": 63,
         "3": 25,
         "4": 5
     },
     "ruleCountsBySeverity": {
-        "CRITICAL": 196,
+        "CRITICAL": 197,
         "NOTICE": 1,
         "WARNING": 10
     },
     "droppedRuleCounts": {
-        "chained": 53,
-        "nonBlocking": 148,
-        "unparseable": 14,
+        "chained": 52,
+        "nonBlocking": 151,
+        "unparseable": 15,
         "unsupportedOperator": 36,
         "unsupportedVariables": 5
     },
