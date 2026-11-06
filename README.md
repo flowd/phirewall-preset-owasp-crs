@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> **Read-only mirror.** This repository is generated from the monorepo [`flowd/phirewall-src`](https://github.com/flowd/phirewall-src) on every release. Please open issues and pull requests there.
+
 # Phirewall OWASP Core Rule Set
 
 OWASP [Core Rule Set (CRS)](https://github.com/coreruleset/coreruleset) support for

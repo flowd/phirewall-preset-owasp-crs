@@ -24,7 +24,11 @@ use Flowd\PhirewallPresetOwaspCrs\Import\Importer;
 error_reporting(E_ALL);
 ini_set('display_errors', '1');
 
-foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php'] as $autoloadFile) {
+foreach ([
+    __DIR__ . '/../vendor/autoload.php',
+    __DIR__ . '/../../../autoload.php',
+    __DIR__ . '/../../../vendor/autoload.php',
+] as $autoloadFile) {
     if (is_file($autoloadFile)) {
         require $autoloadFile;
         break;
