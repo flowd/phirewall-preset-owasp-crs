@@ -8,7 +8,8 @@ namespace Flowd\PhirewallPresetOwaspCrs\Engine\Operator;
  * Evaluates values against a PCRE regular expression (@rx operator).
  *
  * ModSecurity/CRS @rx patterns are bare PCRE content (never pre-delimited),
- * so the pattern is always wrapped in '~...~u' with any unescaped '~' escaped.
+ * so the pattern is always wrapped in '~...~' with any unescaped '~' escaped and
+ * compiled with {@see self::PATTERN_MODIFIERS}.
  * Previous versions also tried to auto-detect "already-delimited" patterns by
  * checking whether the first and last characters matched — this misfired on
  * real CRS rules whose patterns happen to start and end with the same literal
@@ -27,6 +28,27 @@ namespace Flowd\PhirewallPresetOwaspCrs\Engine\Operator;
  */
 final readonly class RegexEvaluator implements DetailedOperatorEvaluatorInterface
 {
+    /**
+     * PCRE modifiers every @rx pattern is compiled with.
+     *
+     * - s (DOTALL): "." also matches a newline. Every ModSecurity-compatible engine
+     *   compiles @rx this way (ModSecurity v2 msre_op_rx_param_init(), libmodsecurity
+     *   v3 Utils::Regex, Coraza's "(?s)" prefix) and CRS patterns are written for it;
+     *   without it a single %0a inside a payload (e.g. "sleep(%0a5)") breaks every
+     *   ".*"-style span and evades the rule.
+     * - u: UTF-8 subjects and patterns.
+     *
+     * Deliberately not set:
+     * - D (DOLLAR_ENDONLY): ModSecurity v2 sets it, but libmodsecurity v3 and Coraza
+     *   compile @rx with MULTILINE by default, so both let "$" match before a trailing
+     *   newline as PCRE's default does. The shipped rules are all positive (a match
+     *   adds score), so adding D would only let a trailing %0a evade anchored rules
+     *   such as 931120 or 942220.
+     * - m (MULTILINE): "^"/"$" at every line break is not v2 behavior, is being
+     *   phased out as Coraza's default, and widens runtime exclusion conditions.
+     */
+    public const PATTERN_MODIFIERS = 'su';
+
     /** Cached regex pattern with delimiters, ready for preg_match(). */
     private string $delimitedPattern;
 
@@ -91,7 +113,8 @@ final readonly class RegexEvaluator implements DetailedOperatorEvaluatorInterfac
     }
 
     /**
-     * Wrap a bare PCRE pattern in '~...~u' delimiters, escaping any unescaped '~'.
+     * Wrap a bare PCRE pattern in '~...~' delimiters with {@see self::PATTERN_MODIFIERS},
+     * escaping any unescaped '~'.
      *
      * This is the only correct transformation for ModSecurity @rx arguments, which
      * are bare PCRE content by spec.
@@ -124,7 +147,6 @@ final readonly class RegexEvaluator implements DetailedOperatorEvaluatorInterfac
             ));
         }
 
-        // Unicode mode mirrors CRS behavior for text processing.
-        return '~' . $escaped . '~u';
+        return '~' . $escaped . '~' . self::PATTERN_MODIFIERS;
     }
 }

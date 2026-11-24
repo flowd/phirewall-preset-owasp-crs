@@ -82,7 +82,7 @@ final class EveryRulePayloadTest extends TestCase
         // Evaluate the rule in isolation so a match can only be attributed to it;
         // the matched-rules list is asserted independently of any block decision.
         $isolatedRuleSet = new CoreRuleSet([$rule]);
-        $evaluation = $isolatedRuleSet->evaluate($this->buildRequest($entry['vector'], $payload), anomalyThreshold: 1);
+        $evaluation = $isolatedRuleSet->evaluate(self::buildRequest($entry['vector'], $payload), anomalyThreshold: 1);
 
         $this->assertSame([$id], $evaluation->matchedRuleIds(), "Payload for rule {$id} did not trigger it (vector {$entry['vector']}).");
     }
@@ -131,8 +131,9 @@ final class EveryRulePayloadTest extends TestCase
      * {@see requestFor()} in tools/generate-rule-payloads.php so a fixture the
      * generator verified reproduces here; the named-header vectors in particular
      * (`header:<NAME>`, `header_content_type`) exist only for kept header rules.
+     * Shared with {@see NewlineInsertionTest}.
      */
-    private function buildRequest(string $vector, string $payload): ServerRequestInterface
+    public static function buildRequest(string $vector, string $payload): ServerRequestInterface
     {
         $base = new ServerRequest('GET', 'https://example.test/');
 

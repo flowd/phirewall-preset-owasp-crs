@@ -200,21 +200,26 @@ final readonly class TargetSelector
     }
 
     /**
-     * Validate a `/pattern/flags` member form; header-name patterns gain the `i` flag.
+     * Validate a `/pattern/flags` member form. Every name pattern gains the `s`
+     * (DOTALL) flag so "." also matches a newline in a member name, as in ModSecurity
+     * v2 and libmodsecurity v3, which compile selector regexes with DOTALL; header-name
+     * patterns additionally gain the `i` flag.
      */
     private static function compileNamePattern(string $memberPart, bool $caseInsensitive): ?string
     {
-        $pattern = $memberPart;
-        if ($caseInsensitive) {
-            $delimiterEnd = strrpos($pattern, '/');
-            if ($delimiterEnd === 0) {
-                return null; // no closing delimiter
-            }
+        $delimiterEnd = strrpos($memberPart, '/');
+        if ($delimiterEnd === 0) {
+            return null; // no closing delimiter
+        }
 
-            $flags = substr($pattern, $delimiterEnd + 1);
-            if (!str_contains($flags, 'i')) {
-                $pattern .= 'i';
-            }
+        $flags = substr($memberPart, $delimiterEnd + 1);
+        $pattern = $memberPart;
+        if (!str_contains($flags, 's')) {
+            $pattern .= 's';
+        }
+
+        if ($caseInsensitive && !str_contains($flags, 'i')) {
+            $pattern .= 'i';
         }
 
         return @preg_match($pattern, '') === false ? null : $pattern;

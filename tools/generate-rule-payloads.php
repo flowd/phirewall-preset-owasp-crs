@@ -577,9 +577,10 @@ $manualOverrides = [
     // Java serialized-object header: the engine compiles @rx with the /u flag, so the
     // signature bytes must be supplied as their UTF-8 code points (U+00AC U+00ED ...).
     944200 => ['vector' => 'args', 'payload' => "\u{00AC}\u{00ED}\u{0000}\u{0005}"],
-    // Empty-header rules (@rx ^$): the engine wraps the pattern as ~^$~u (no PCRE_DOLLAR_ENDONLY,
-    // matching ModSecurity), so $ matches before a trailing newline and a lone-LF header value
-    // matches while surviving the empty-value skip (it is not === '').
+    // Empty-header rules (@rx ^$): the engine compiles @rx without PCRE_DOLLAR_ENDONLY (as
+    // libmodsecurity v3 and Coraza do by default; ModSecurity v2 sets it), so $ matches before a
+    // trailing newline and a lone-LF header value matches while surviving the empty-value skip
+    // (it is not === '').
     920290 => ['vector' => 'header:Host', 'payload' => "\n"],
     920330 => ['vector' => 'header_ua', 'payload' => "\n"],
     // OS command injection on the User-Agent; the sampler cannot reach a valid command

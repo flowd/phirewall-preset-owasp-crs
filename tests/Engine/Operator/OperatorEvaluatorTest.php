@@ -15,6 +15,7 @@ use Flowd\PhirewallPresetOwaspCrs\Engine\Operator\StringEqualEvaluator;
 use Flowd\PhirewallPresetOwaspCrs\Engine\Operator\UnsupportedOperatorEvaluator;
 use Flowd\PhirewallPresetOwaspCrs\Engine\RuleOutcome;
 use org\bovigo\vfs\vfsStream;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class OperatorEvaluatorTest extends TestCase
@@ -58,7 +59,7 @@ final class OperatorEvaluatorTest extends TestCase
     public function testRegexEvaluatorWrapsBarePattern(): void
     {
         $delimited = RegexEvaluator::wrapInTildeDelimiters('^admin');
-        $this->assertSame('~^admin~u', $delimited);
+        $this->assertSame('~^admin~su', $delimited);
     }
 
     public function testRegexEvaluatorWrapsPatternWithLiteralSlashes(): void
@@ -66,13 +67,13 @@ final class OperatorEvaluatorTest extends TestCase
         // CRS @rx patterns are bare PCRE content, so leading/trailing slashes are literal,
         // not delimiters. The wrapper must keep them inside the body.
         $delimited = RegexEvaluator::wrapInTildeDelimiters('/^test$/i');
-        $this->assertSame('~/^test$/i~u', $delimited);
+        $this->assertSame('~/^test$/i~su', $delimited);
     }
 
     public function testRegexEvaluatorEscapesTildeInPattern(): void
     {
         $delimited = RegexEvaluator::wrapInTildeDelimiters('foo~bar');
-        $this->assertSame('~foo\~bar~u', $delimited);
+        $this->assertSame('~foo\~bar~su', $delimited);
     }
 
     public function testRegexEvaluatorPreservesAlreadyEscapedTilde(): void
@@ -80,8 +81,8 @@ final class OperatorEvaluatorTest extends TestCase
         // Input: foo + 1 backslash + tilde (odd=1: tilde is escaped)
         $input = "foo\x5C~bar";
         $delimited = RegexEvaluator::wrapInTildeDelimiters($input);
-        // Output: ~foo + 1 backslash + tilde + bar~u (unchanged)
-        $this->assertSame("~foo\x5C~bar~u", $delimited);
+        // Output: ~foo + 1 backslash + tilde + bar~su (unchanged)
+        $this->assertSame("~foo\x5C~bar~su", $delimited);
     }
 
     public function testRegexEvaluatorEscapesTildeAfterEvenBackslashes(): void
@@ -89,8 +90,8 @@ final class OperatorEvaluatorTest extends TestCase
         // Input: foo + 2 backslashes + tilde (even=2: backslashes escape each other, tilde is unescaped)
         $input = "foo\x5C\x5C~bar";
         $delimited = RegexEvaluator::wrapInTildeDelimiters($input);
-        // Output: ~foo + 2 backslashes + escaped tilde (3 backslashes + tilde) + bar~u
-        $this->assertSame("~foo\x5C\x5C\x5C~bar~u", $delimited);
+        // Output: ~foo + 2 backslashes + escaped tilde (3 backslashes + tilde) + bar~su
+        $this->assertSame("~foo\x5C\x5C\x5C~bar~su", $delimited);
     }
 
     public function testRegexEvaluatorPreservesTildeAfterOddBackslashes(): void
@@ -98,8 +99,59 @@ final class OperatorEvaluatorTest extends TestCase
         // Input: foo + 3 backslashes + tilde (odd=3: last backslash escapes tilde)
         $input = "foo\x5C\x5C\x5C~bar";
         $delimited = RegexEvaluator::wrapInTildeDelimiters($input);
-        // Output: ~foo + 3 backslashes + tilde + bar~u (unchanged)
-        $this->assertSame("~foo\x5C\x5C\x5C~bar~u", $delimited);
+        // Output: ~foo + 3 backslashes + tilde + bar~su (unchanged)
+        $this->assertSame("~foo\x5C\x5C\x5C~bar~su", $delimited);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function lineBreakProvider(): iterable
+    {
+        yield 'LF' => ["\n"];
+        yield 'CRLF' => ["\r\n"];
+        yield 'CR' => ["\r"];
+    }
+
+    /**
+     * Regression: @rx patterns were compiled without DOTALL, so "." stopped at a line
+     * break and a single %0a split CRS spans such as 942160's sleep\s*?\(.*?\).
+     * ModSecurity-compatible engines compile @rx with DOTALL.
+     */
+    #[DataProvider('lineBreakProvider')]
+    public function testRegexEvaluatorDotMatchesLineBreaks(string $lineBreak): void
+    {
+        $this->assertTrue((new RegexEvaluator('sleep\s*?\(.*?\)'))->evaluate(['1 and sleep(' . $lineBreak . '5)']));
+        $this->assertTrue((new RegexEvaluator('(?i)union.+select'))->evaluate(['1 UNION' . $lineBreak . 'SELECT 2']));
+        // Each "." consumes one byte of the line break, so CRLF needs two.
+        $this->assertSame(strlen($lineBreak) === 1, (new RegexEvaluator('^a.b$'))->evaluate(['a' . $lineBreak . 'b']));
+        $this->assertTrue((new RegexEvaluator('^a.{1,2}b$'))->evaluate(['a' . $lineBreak . 'b']));
+    }
+
+    public function testRegexEvaluatorHonorsInlineFlagsAlongsideDotall(): void
+    {
+        // The t:lowercase importer prepends (?i); it must combine with, not replace, DOTALL.
+        $this->assertTrue((new RegexEvaluator('(?i)sleep\(.*\)'))->evaluate(["SLEEP(\n5)"]));
+        // A pattern may still opt out of DOTALL locally.
+        $this->assertFalse((new RegexEvaluator('(?-s)a.b'))->evaluate(["a\nb"]));
+    }
+
+    /**
+     * "$" keeps PCRE's default (no DOLLAR_ENDONLY): it matches at the end of the subject
+     * and before one final newline, as in libmodsecurity v3 and Coraza, so a trailing
+     * %0a cannot evade an end-anchored positive rule. MULTILINE is off: "^" and "$" do
+     * not match around an inner line break.
+     */
+    public function testRegexEvaluatorAnchorsWithTrailingNewline(): void
+    {
+        $anchored = new RegexEvaluator('^(?:json\.)?4294967295$');
+        $this->assertTrue($anchored->evaluate(['4294967295']));
+        $this->assertTrue($anchored->evaluate(["4294967295\n"]), '$ matches before a single trailing newline');
+        $this->assertFalse($anchored->evaluate(["4294967295\n\n"]));
+        $this->assertFalse($anchored->evaluate(["4294967295\nx"]), '$ does not match at an inner line break');
+        $this->assertFalse($anchored->evaluate(["x\n4294967295"]), '^ does not match after an inner line break');
+
+        $this->assertFalse((new RegexEvaluator('\A4294967295\z'))->evaluate(["4294967295\n"]), '\z stays end-of-subject only');
     }
 
     // --- ContainsEvaluator ---

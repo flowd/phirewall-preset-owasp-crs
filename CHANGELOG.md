@@ -5,6 +5,12 @@ All notable changes to this package are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.11.1 - 2026-11-24
+
+### Security
+
+- **`@rx` patterns are compiled with DOTALL, closing a newline evasion.** The engine wrapped every `@rx` pattern as `~...~u`, so `.` did not match a line break, while ModSecurity v2, libmodsecurity v3 and Coraza all compile `@rx` with DOTALL and the CRS patterns are written for it. A single `%0a` inside a payload split any `.*`-style span and evaded the rule: `?id=1 and sleep(%0a5)` passed the default `Presets::blocklist()` while `?id=1 and sleep(5)` was blocked (942160). Re-running the shipped rule payloads with a newline inserted at every offset, 44 rules lost their match where a space at the same offset kept it; after the fix 41 of them match and the remaining 3 (932310, 933160, 942400) are patterns that deliberately require a literal space or treat the line break as a comment terminator. Patterns are now compiled with the `su` modifiers (`RegexEvaluator::PATTERN_MODIFIERS`). `$` semantics are unchanged: it still matches before one trailing newline (PCRE default, as in libmodsecurity v3 and Coraza; ModSecurity v2's `PCRE_DOLLAR_ENDONLY` is not adopted because every shipped rule is a positive match and it would let a trailing `%0a` evade end-anchored rules such as 931120 and 942220), and `^`/`$` stay non-multiline. Name patterns in target selectors (`ARGS:/.../`, `!ARGS_NAMES:/.../`, `excludeTarget('ARGS:/^utm_/')`) gain the `s` modifier as well, as in ModSecurity. The compiled-data cache artifact stores bare `@rx` arguments, never delimited patterns, so existing artifacts pick up the new modifiers without a rebuild; no schema bump is needed. Effective immediately against the bundled rules.
+
 ## 0.11.0 - 2026-11-06
 
 ### Added

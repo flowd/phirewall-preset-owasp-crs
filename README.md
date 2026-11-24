@@ -389,6 +389,12 @@ Further engine differences to be aware of:
   lowercase literal; a rule that genuinely wanted case-sensitive matching without
   `t:lowercase` is matched case-insensitively instead (a safe over-match, never an
   under-match).
+- **Regex semantics.** `@rx` patterns are compiled as PCRE with the `s` (DOTALL) and
+  `u` modifiers, as ModSecurity and Coraza compile them: `.` also matches a line
+  break, so a `%0a` inside a payload cannot split a CRS pattern. `$` keeps PCRE's
+  default and also matches before a single trailing newline (as in libmodsecurity v3
+  and Coraza; ModSecurity v2 sets `PCRE_DOLLAR_ENDONLY` instead), and `^`/`$` are not
+  multiline. Name patterns in target selectors (`ARGS:/^utm_/`) also get `s`.
 - **Partial target evaluation.** A kept rule that also lists unsupported selectors
   (for example `XML:/*`) evaluates against its supported targets only. Named and
   negated selectors of supported variables ARE honored: `REQUEST_HEADERS:User-Agent`

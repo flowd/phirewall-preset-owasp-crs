@@ -151,4 +151,19 @@ final class TargetSelectorTest extends TestCase
         // Exclusion semantics: an un-evaluable name is NOT excluded, so it stays inspected too.
         $this->assertFalse($pattern->matchesName($overLongName));
     }
+
+    public function testNamePatternDotMatchesNewlineLikeModSecurity(): void
+    {
+        // ModSecurity v2 and libmodsecurity v3 compile selector regexes with DOTALL,
+        // so "." also spans a newline inside a member name.
+        $positive = TargetSelector::parse('ARGS_NAMES:/^json\..*\.id$/');
+        $this->assertTrue($positive->selectsForInclusion("json.a\nb.id"));
+        $this->assertTrue($positive->matchesName("json.a\r\nb.id"));
+
+        $header = TargetSelector::parse('REQUEST_HEADERS:/^x-.+-token$/');
+        $this->assertTrue($header->matchesName("X-a\nb-Token"), 'header patterns keep the i flag alongside s');
+
+        $explicitFlags = TargetSelector::parse('ARGS:/^a.b$/i');
+        $this->assertTrue($explicitFlags->matchesName("A\nB"), 'user-supplied flags are kept and gain s');
+    }
 }
